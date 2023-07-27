@@ -3,7 +3,8 @@ import torch
 import gpytorch
 import numpy as np
 from enum import Enum
-import math
+
+from gp_models import RBFModel, SpectralMixtureModel
 
 class ColorSpace(Enum):
   BGR = 0
@@ -11,67 +12,67 @@ class ColorSpace(Enum):
   GRAYSCALE = 2
 
 SRF = 2
-IMAGE_NUMS = [0]
+IMAGE_NUMS = [1]
 
-USED_COLOR_SPACE = ColorSpace.BGR
-USE_ALL_PIXELS_FOR_TRAINING = False
-USE_PREDEFINED_HYPERS = True
+USED_COLOR_SPACE = ColorSpace.YUV # ColorSpace.BGR, ColorSpace.YUV, ColorSpace.GRAYSCALE
+USED_MODEL = RBFModel # RBFModel, SpectralMixtureModel
+USE_ALL_PIXELS_FOR_TRAINING = False # When False, only samples pixels in a grid pattern
+USE_PREDEFINED_HYPERS = True # Only for RBF, SpectralMixtureModel does this automatically
 LEARNING_RATE = 0.1
-OVERLAP = 2/3 # Percentage of overlap between patches
+OFFSET_RATE = 0.8 # OFFSET / PATCH_SIZE (0.8 implies around 66% overlap overall)
 
-PATCH_SIZE = SRF * 10
-OFFSET = int(PATCH_SIZE * (1 + math.sqrt(1-OVERLAP)) // 2) if OVERLAP > 0 else PATCH_SIZE - 1
-UPSAMPLED_PATCH_SIZE = PATCH_SIZE * SRF
+def get_patch_size(scaling_factor):
+  return 20#int(scaling_factor * 10)
 
-class ExactGPModel(gpytorch.models.ExactGP):
-  def __init__(self, train_x, train_y, likelihood):
-    super(ExactGPModel, self).__init__(train_x, train_y, likelihood)
-    self.mean_module = gpytorch.means.ConstantMean()
-    self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+def get_offset(scaling_factor):
+  # We need to leave a 1px border for the edges
+  return int((get_patch_size(scaling_factor)-2) * OFFSET_RATE)
 
-  def forward(self, x):
-    mean_x = self.mean_module(x)
-    covar_x = self.covar_module(x)
-    return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
-
-def extract_patch(img, indices, scale=1):
+def extract_patch(img, indices, patch_size):
   y, x = indices
-  x *= scale
-  y *= scale
-  return img[y:y+PATCH_SIZE*scale, x:x+PATCH_SIZE*scale].copy()
+  return img[y:y+patch_size, x:x+patch_size].copy()
 
 def extract_neighbors(img, y, x):
   return [img[y_val, x_val] for y_val, x_val in [(y+1, x), (y-1, x), (y, x+1), (y, x-1), (y+1, x+1), (y-1, x-1), (y+1, x-1), (y-1, x+1)]]
 
-def predict_pixels(training_input, training_target, test_input):
+# Predicts the pixels in the test image using the training image.
+# Note that the test_input is already upscaled, so it has a different size than training_input and training_target.
+def predict_pixels(training_input, training_target, test_input, scaling_factor):
+  assert training_input.shape == training_target.shape
+  assert test_input.shape[0] == training_input.shape[0] * scaling_factor
+  assert get_patch_size(scaling_factor) <= training_input.shape[0], f'Patch size {get_patch_size(scaling_factor)} is larger than image size {training_input.shape[0]}'
+
+  upsampled_patch_size = int(get_patch_size(scaling_factor) * scaling_factor)
+
   patch_indices = []
-  for x in range(0, training_input.shape[1] - 1, OFFSET):
-    if x + PATCH_SIZE > training_input.shape[1]:
-      x = training_input.shape[1] - PATCH_SIZE
-    for y in range(0, training_input.shape[0] - 1, OFFSET):
-      if y + PATCH_SIZE > training_input.shape[0]:
-        y = training_input.shape[0] - PATCH_SIZE
+  for x in range(0, training_input.shape[1] - 1, get_offset(scaling_factor)):
+    if x + get_patch_size(scaling_factor) > training_input.shape[1]:
+      x = training_input.shape[1] - get_patch_size(scaling_factor)
+    for y in range(0, training_input.shape[0] - 1, get_offset(scaling_factor)):
+      if y + get_patch_size(scaling_factor) > training_input.shape[0]:
+        y = training_input.shape[0] - get_patch_size(scaling_factor)
 
       if (y, x) not in patch_indices:
         patch_indices.append((y, x))
+  upsampled_patch_indices = [(int(y*scaling_factor), int(x*scaling_factor)) for y, x in patch_indices]
   
   if USE_ALL_PIXELS_FOR_TRAINING:
-    training_points = [(y, x) for y in range(1, PATCH_SIZE-1) for x in range(1, PATCH_SIZE-1)]
+    training_points = [(y, x) for y in range(1, get_patch_size(scaling_factor)-1) for x in range(1, get_patch_size(scaling_factor)-1)]
   else:
-    training_indices = [i for i in range(1, PATCH_SIZE//2, 2)] + [i for i in range(PATCH_SIZE//2, PATCH_SIZE, 2)]
+    training_indices = [i for i in range(1, get_patch_size(scaling_factor)//2, 2)] + [i for i in range(get_patch_size(scaling_factor)//2, get_patch_size(scaling_factor) - 1, 2)]
     training_points = [(y, x) for y in training_indices for x in training_indices]
 
   upsampled_patches = []
-  for patch_y, patch_x in patch_indices:
-    training_input_patch = extract_patch(training_input, (patch_y, patch_x))
-    training_target_patch = extract_patch(training_target, (patch_y, patch_x))
+  for (patch_y, patch_x), (upsampled_patch_y, upsampled_patch_x) in zip(patch_indices, upsampled_patch_indices):
+    training_input_patch = extract_patch(training_input, (patch_y, patch_x), get_patch_size(scaling_factor))
+    training_target_patch = extract_patch(training_target, (patch_y, patch_x), get_patch_size(scaling_factor))
     train_x = torch.tensor([extract_neighbors(training_input_patch, y, x) for y, x in training_points])
     train_y = torch.tensor([training_target_patch[y, x] for y, x in training_points])
 
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
-    model = ExactGPModel(train_x, train_y, likelihood)
+    model = USED_MODEL(train_x, train_y, likelihood)
 
-    if USE_PREDEFINED_HYPERS:
+    if USE_PREDEFINED_HYPERS and USED_MODEL == RBFModel:
       hypers = {
         'likelihood.noise_covar.noise': torch.tensor(0.001),
         'covar_module.base_kernel.lengthscale': torch.tensor(0.223),
@@ -95,60 +96,67 @@ def predict_pixels(training_input, training_target, test_input):
     model.eval()
     likelihood.eval()
 
-    test_input_patch = extract_patch(test_input, (patch_y, patch_x), SRF)
-    test_x = torch.tensor([extract_neighbors(test_input_patch, y, x) for y in range(1, UPSAMPLED_PATCH_SIZE-1) for x in range(1, UPSAMPLED_PATCH_SIZE-1)])
+    test_input_patch = extract_patch(test_input, (upsampled_patch_y, upsampled_patch_x), upsampled_patch_size)
+    test_x = torch.tensor([extract_neighbors(test_input_patch, y, x) for y in range(1, upsampled_patch_size-1) for x in range(1, upsampled_patch_size-1)])
 
     test_y = likelihood(model(test_x)).mean
 
-    test_input_patch[1:-1, 1:-1] = test_y.reshape(UPSAMPLED_PATCH_SIZE-2, UPSAMPLED_PATCH_SIZE-2).detach().numpy()
+    test_input_patch[1:-1, 1:-1] = test_y.reshape(upsampled_patch_size-2, upsampled_patch_size-2).detach().numpy()
     upsampled_patches.append(test_input_patch)
 
-  upscaled = np.zeros(test_input.shape)
+  upsampled = np.zeros(test_input.shape)
   overlapped_counter = np.zeros(test_input.shape)
-  for patch_index_pair, upsampled_patch in zip(patch_indices, upsampled_patches):
-    y, x = patch_index_pair
-    x *= SRF
-    y *= SRF
-    
+  for (y, x), upsampled_patch in zip(upsampled_patch_indices, upsampled_patches):    
+    # Considerations for edges. Since they are not predicted by the model, they should not be used.
+    # Except at the edge of the image, where they are used to fill in the missing pixels.
+    # These values are straight from the original (bicubic) upscaling.
     x_start = 0 if x == 0 else 1
     y_start = 0 if y == 0 else 1
-    x_end = UPSAMPLED_PATCH_SIZE if x + UPSAMPLED_PATCH_SIZE == upscaled.shape[1] else UPSAMPLED_PATCH_SIZE - 1
-    y_end = UPSAMPLED_PATCH_SIZE if y + UPSAMPLED_PATCH_SIZE == upscaled.shape[0] else UPSAMPLED_PATCH_SIZE - 1
+    x_end = upsampled_patch_size if x + upsampled_patch_size == upsampled.shape[1] else upsampled_patch_size - 1
+    y_end = upsampled_patch_size if y + upsampled_patch_size == upsampled.shape[0] else upsampled_patch_size - 1
 
     for j in range(y_start, y_end):
       for k in range(x_start, x_end):
-        upscaled[y+j, x+k] += upsampled_patch[j, k]
+        upsampled[y+j, x+k] += upsampled_patch[j, k]
         overlapped_counter[y+j, x+k] += 1
 
-  upscaled /= overlapped_counter
-  upscaled = np.clip(upscaled, 0, 1)
+  upsampled /= overlapped_counter
+  upsampled = np.clip(upsampled, 0, 1)
 
-  return upscaled
+  return upsampled
 
-def upsample(img):
-  bicubic = cv2.resize(img, None, fx=SRF, fy=SRF, interpolation=cv2.INTER_CUBIC)
+def upsample(img, scaling_factor):
+  bicubic = cv2.resize(img, None, fx=scaling_factor, fy=scaling_factor, interpolation=cv2.INTER_CUBIC)
+  prediction = predict_pixels(img, img, bicubic, scaling_factor)
 
-  return predict_pixels(img, img, bicubic)
+  return prediction
 
-
-def blur_downsample(img):
-  # TODO: Use pyrDown instead?
+def blur_downsample(img, scaling_factor):
   img = cv2.GaussianBlur(img, (5, 5), 0)
-  img = cv2.resize(img, None, fx=1/SRF, fy=1/SRF, interpolation=cv2.INTER_CUBIC)
+  img = cv2.resize(img, None, fx=1/scaling_factor, fy=1/scaling_factor)
   return img
 
-def deblur(blurred_high, blurred_low, low):
-  return predict_pixels(blurred_low, low, blurred_high)
+def deblur(blurred_high, blurred_low, low, scaling_factor):
+  return predict_pixels(blurred_low, low, blurred_high, scaling_factor)
+
+def gprsr_for_channel_with_scale(img, scaling_factor):
+  blurred_high = upsample(img, scaling_factor)
+  blurred_low = blur_downsample(blurred_high, scaling_factor)
+  high = deblur(blurred_high, blurred_low, img, scaling_factor)
+
+  return high
 
 def gprsr_for_channel(img):
   img = img.astype(np.double) / 255
 
-  blurred_high = upsample(img)
-  blurred_low = blur_downsample(blurred_high)
-  high = deblur(blurred_high, blurred_low, img)
+  scaling_factor = SRF
+  while scaling_factor >= 4:
+    img = gprsr_for_channel_with_scale(img, scaling_factor=2)
+    scaling_factor /= 2.
+  img = gprsr_for_channel_with_scale(img, scaling_factor=scaling_factor)
 
-  result = (high*255).astype(np.uint8)
-  return result
+  img = (img*255).astype(np.uint8)
+  return img
 
 def gprsr(img):
   if USED_COLOR_SPACE == ColorSpace.GRAYSCALE:
@@ -161,7 +169,6 @@ def gprsr(img):
     v = cv2.resize(v, None, fx=SRF, fy=SRF, interpolation=cv2.INTER_CUBIC)
 
     y = gprsr_for_channel(y)
-
     imgOutYuv = cv2.merge((y, u, v))
     imgOut = cv2.cvtColor(imgOutYuv, cv2.COLOR_YUV2BGR)
   else:
@@ -179,4 +186,4 @@ for i in IMAGE_NUMS:
   
   gprImg = gprsr(lrImg)
 
-  cv2.imwrite(f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_SM.png', gprImg)
+  cv2.imwrite(f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR.png', gprImg)
