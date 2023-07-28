@@ -4,7 +4,7 @@ import gpytorch
 import numpy as np
 from enum import Enum
 
-from gp_models import RBFModel, SpectralMixtureModel
+from gp_models import ExponentialModel, MaternModel32, MaternModel52, RBFModel, SpectralMixtureModel
 
 ############## NOTE ##############
 # After running this, use the comparison.sh and comparison2.sh scripts to compare the results to the bicubic upscaling and other algorithms.
@@ -22,13 +22,13 @@ class ColorSpace(Enum):
 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
 SRF = 2
 # Image numbers to be used from the Set14 dataset (1-14)
-IMAGE_NUMS = [15]
+IMAGE_NUMS = range(12, 15)
 
 USED_COLOR_SPACE = ColorSpace.YUV
-# TODO: Add support for SpectralMixtureModel and other kernels
-USED_MODEL = RBFModel # currently only supports RBFModel
+# TODO: Add support for SpectralMixtureModel
+USED_MODEL = MaternModel32 # currently only supports RBFModel, ExponentialModel, MaternModel32, MaternModel52
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
-USE_PREDEFINED_HYPERS = True # Only for RBF, SpectralMixtureModel does this automatically
+USE_PREDEFINED_HYPERS = False # Only for RBF, SpectralMixtureModel does this automatically
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
 STRIDE_PERCENT = 0.8 # STRIDE / PATCH_SIZE
 
@@ -111,7 +111,7 @@ def predict_pixels(training_input, training_target, test_input, scaling_factor):
       }
       model.initialize(**hypers)
 
-    # TODO: We currently do a hyperparameter training loop for each patch, but we could also do this for only a few patches and then use the model for all patches.
+    # TODO: We currently do a hyperparameter tuning loop for each patch, but we could also do this for only a few patches and then use the model for all patches.
     # This would easily speed up the algorithm by a high factor, but might result in worse predictions.
     model.train()
     likelihood.train()
@@ -244,4 +244,4 @@ for i in IMAGE_NUMS:
   
   gprImg = gprsr(lrImg)
 
-  cv2.imwrite(f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR.png', gprImg)
+  cv2.imwrite(f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_matern32.png', gprImg)

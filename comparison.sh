@@ -1,7 +1,7 @@
 #!/bin/bash
 
 SRF=${1:-2}
-declare -a types=("bicubic" "glasner" "Kim" "nearest" "ScSR" "SelfExSR" "SRCNN" "GPR")
+declare -a types=("bicubic" "glasner" "Kim" "nearest" "ScSR" "SelfExSR" "SRCNN" "GPR" "GPR_exponential" "GPR_matern32")
 
 calculate_ssim_psnr() {
   local image1="$1"
@@ -37,7 +37,7 @@ get_crop() {
 for type in "${types[@]}"; do
   sum_ssim=0
   sum_psnr=0
-  for i in $(seq -f %03g 1 14); do
+  for i in $(seq -f %03g 14); do
     image1="Set14/image_SRF_${SRF}/img_${i}_SRF_${SRF}_HR.png"
     image2="Set14/image_SRF_${SRF}/img_${i}_SRF_${SRF}_${type}.png"
     read crop <<< $(get_crop "$image1")
