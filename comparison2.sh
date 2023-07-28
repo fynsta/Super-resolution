@@ -1,7 +1,7 @@
 #!/bin/bash
 
+SRF=${1:-2}
 types=("bicubic" "GPR") # ("nearest" "ScSR" "SelfExSR" "SRCNN" "glasner" "Kim")
-SRF="2"
 
 calculate_ssim_psnr() {
   local image1="$1"
@@ -34,7 +34,7 @@ get_crop() {
   echo "$crop"
 }
 
-for i in $(seq -f %03g 0 14); do
+for i in $(seq -f %03g 1 14); do
   echo "----------------------------------------"
   echo "Image $i"
   for type in "${types[@]}"; do

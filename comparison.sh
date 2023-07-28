@@ -1,7 +1,7 @@
 #!/bin/bash
 
+SRF=${1:-2}
 declare -a types=("bicubic" "glasner" "Kim" "nearest" "ScSR" "SelfExSR" "SRCNN" "GPR")
-SRF="2"
 
 calculate_ssim_psnr() {
   local image1="$1"
