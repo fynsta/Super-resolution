@@ -9,7 +9,7 @@ from gp_models import ExponentialModel, MaternModel32, MaternModel52, RBFModel, 
 ############## NOTE ##############
 # After running this, use the comparison.sh and comparison2.sh scripts to compare the results to the bicubic upscaling and other algorithms.
 # I have only run full GPR on all pictures for the 2x scaling factor, so you cannot the script with a different scaling factor.
-# comparison.sh averages the PSNR and SSIM values over all images, comparison2.sh shows the values for each image.
+# comparison_methods.sh averages the PSNR and SSIM values over all images, comparison_images.sh shows the values for each image.
 # (The scripts require ImageMagick (https://imagemagick.org/script/download.php) to be installed)
 # Currently, GPR is slightly worse than bicubic upscaling for most images.
 ##################################
@@ -19,10 +19,16 @@ class ColorSpace(Enum):
   YUV = 1
   GRAYSCALE = 2
 
+class Dataset(Enum):
+  Set14 = 0
+  Set14Smaller = 1 # Created with create_smaller_data.py. Same images as Set14, but 4x smaller.
+
 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
 SRF = 2
-# Image numbers to be used from the Set14 dataset (1-14)
-IMAGE_NUMS = range(12, 15)
+# The dataset to be used for the algorithm
+DATASET = Dataset.Set14Smaller
+# Image numbers to be used from the used dataset (1-14)
+IMAGE_NUMS = range(2, 15)
 
 USED_COLOR_SPACE = ColorSpace.YUV
 # TODO: Add support for SpectralMixtureModel
@@ -239,9 +245,18 @@ def gprsr(img):
 # The paper does not give a dataset, but Set14 is a common benchmark dataset for super resolution.
 # Of course, you can also apply the algorithm to your own images.
 for i in IMAGE_NUMS:
-  lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
+  if DATASET == Dataset.Set14:
+    lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
+  elif DATASET == Dataset.Set14Smaller:
+    lrImagePath = f'Set14_smaller/{i:03d}_LR.png'
+
   lrImg = cv2.imread(lrImagePath)
   
   gprImg = gprsr(lrImg)
 
-  cv2.imwrite(f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_matern32.png', gprImg)
+  if DATASET == Dataset.Set14:
+    gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{USED_MODEL._get_name()}.png'
+  elif DATASET == Dataset.Set14Smaller:
+    gprImagePath = f'Set14_smaller/{i:03d}_GPR_{USED_MODEL._get_name()}_{SRF}x.png'
+
+  cv2.imwrite(gprImagePath, gprImg)

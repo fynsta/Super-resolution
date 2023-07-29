@@ -1,7 +1,22 @@
 #!/bin/bash
 
 SRF=${1:-2}
+DATASET=${2:-"Set14"}
+
 types=("bicubic" "GPR" "GPR_exponential" "GPR_matern32" ) # ("nearest" "ScSR" "SelfExSR" "SRCNN" "glasner" "Kim")
+
+get_image_path() {
+  local image="$1"
+  local type="$2"
+
+  if [ "$DATASET" == "Set14" ]; then
+    local path="Set14/image_SRF_${SRF}/img_${image}_SRF_${SRF}_${type}.png"
+  else
+    local path="Set14_smaller/${image}_${type}_${SRF}x.png"
+  fi
+
+  echo "$path"
+}
 
 calculate_ssim_psnr() {
   local image1="$1"
@@ -38,8 +53,9 @@ for i in $(seq -f %03g 14); do
   echo "----------------------------------------"
   echo "Image $i"
   for type in "${types[@]}"; do
-    image1="Set14/image_SRF_${SRF}/img_${i}_SRF_${SRF}_HR.png"
-    image2="Set14/image_SRF_${SRF}/img_${i}_SRF_${SRF}_${type}.png"
+    read image1 <<< $(get_image_path "$i" "HR")
+    read image2 <<< $(get_image_path "$i" "$type")
+
     read crop <<< $(get_crop "$image1")
     read ssim psnr <<< $(calculate_ssim_psnr "$image1" "$image2" "$crop")
     
