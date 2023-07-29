@@ -40,7 +40,7 @@ class MaternModel32(BaseModel):
   
 class ExponentialModel(BaseModel):
   def __init__(self, train_inputs, train_targets, likelihood):
-    covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.ExponentialKernel())
+    covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.MaternKernel(nu=0.5))
     super().__init__(train_inputs, train_targets, likelihood, covar_module)
 
   def _get_name():
@@ -62,5 +62,3 @@ class SpectralMixtureModel(BaseModel):
 
   def _get_name():
     return "spectral_mixture"
-  
-print(MaternModel32._get_name())

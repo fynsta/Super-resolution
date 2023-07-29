@@ -6,14 +6,6 @@ from enum import Enum
 
 from gp_models import ExponentialModel, MaternModel32, MaternModel52, RBFModel, SpectralMixtureModel
 
-############## NOTE ##############
-# After running this, use the comparison.sh and comparison2.sh scripts to compare the results to the bicubic upscaling and other algorithms.
-# I have only run full GPR on all pictures for the 2x scaling factor, so you cannot the script with a different scaling factor.
-# comparison_methods.sh averages the PSNR and SSIM values over all images, comparison_images.sh shows the values for each image.
-# (The scripts require ImageMagick (https://imagemagick.org/script/download.php) to be installed)
-# Currently, GPR is slightly worse than bicubic upscaling for most images.
-##################################
-
 class ColorSpace(Enum):
   BGR = 0
   YUV = 1
@@ -32,7 +24,7 @@ IMAGE_NUMS = range(2, 15)
 
 USED_COLOR_SPACE = ColorSpace.YUV
 # TODO: Add support for SpectralMixtureModel
-USED_MODEL = MaternModel32 # currently only supports RBFModel, ExponentialModel, MaternModel32, MaternModel52
+USED_MODEL = RBFModel # currently only supports RBFModel, ExponentialModel, MaternModel32, MaternModel52
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
 USE_PREDEFINED_HYPERS = False # Only for RBF, SpectralMixtureModel does this automatically
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
