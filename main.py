@@ -4,7 +4,7 @@ import gpytorch
 import numpy as np
 from enum import Enum
 
-from gp_models import ExponentialModel, MaternModel32, MaternModel52, RBFModel, SpectralMixtureModel
+from gp_models import ExponentialModel, Matern32Model, Matern52Model, RBFModel, SpectralMixtureModel
 
 class ColorSpace(Enum):
   BGR = 0
@@ -20,13 +20,13 @@ SRF = 2
 # The dataset to be used for the algorithm
 DATASET = Dataset.Set14Smaller
 # Image numbers to be used from the used dataset (1-14)
-IMAGE_NUMS = range(2, 15)
+IMAGE_NUMS = range(1, 15)
 
 USED_COLOR_SPACE = ColorSpace.YUV
 # TODO: Add support for SpectralMixtureModel
-USED_MODEL = RBFModel # currently only supports RBFModel, ExponentialModel, MaternModel32, MaternModel52
+USED_MODEL = Matern32Model # currently supports RBFModel, ExponentialModel, MaternModel32, MaternModel52
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
-USE_PREDEFINED_HYPERS = False # Only for RBF, SpectralMixtureModel does this automatically
+USE_PREDEFINED_HYPERS = False # Only for RBF (SpectralMixtureModel does this inherently)
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
 STRIDE_PERCENT = 0.8 # STRIDE / PATCH_SIZE
 
@@ -184,7 +184,7 @@ def blur_downsample(img, scaling_factor):
 def deblur(blurred_high, blurred_low, low, scaling_factor):
   return predict_pixels(blurred_low, low, blurred_high, scaling_factor)
 
-# GP-SR algorithm for a single channel and a single scaling factor.
+# GPR-SR algorithm for a single channel and a single scaling factor.
 # UPSAMPLE -> BLUR AND DOWNSAMPLE -> DEBLUR
 def gprsr_for_channel_with_scale(img, scaling_factor):
   blurred_high = upsample(img, scaling_factor)
@@ -193,7 +193,7 @@ def gprsr_for_channel_with_scale(img, scaling_factor):
 
   return high
 
-# GP-SR algorithm for a single channel.
+# GPR-SR algorithm for a single channel.
 # Handles higher scaling factors by recursively calling itself with smaller scaling factors.
 # Also converts the data to [0,1] before and after the algorithm to avoid numerical issues.
 def gprsr_for_channel(img):
@@ -208,7 +208,7 @@ def gprsr_for_channel(img):
   img = (img*255).astype(np.uint8)
   return img
 
-# GP-SR algorithm for a single image.
+# GPR-SR algorithm for a single image.
 # Handles different color spaces by converting the image to the desired color space before and after the algorithm.
 # Available color spaces are BGR, YUV and grayscale (of course, grayscale will result in a black and white image)
 # Note that the paper uses YIQ, but YUV is very similar in that we only upscale the Y channel (and UV are spanning the same space as IQ)
@@ -231,24 +231,25 @@ def gprsr(img):
     g = gprsr_for_channel(g)
     r = gprsr_for_channel(r)
     imgOut = cv2.merge((b, g, r))
+
   return imgOut
 
-# Main loop. Loops over all images in the Set14 dataset and applies the GP-SR algorithm.
+# Main loop. Loops over all images in the Set14 dataset and applies the GPR-SR algorithm.
 # The paper does not give a dataset, but Set14 is a common benchmark dataset for super resolution.
 # Of course, you can also apply the algorithm to your own images.
-for i in IMAGE_NUMS:
-  if DATASET == Dataset.Set14:
-    lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
-  elif DATASET == Dataset.Set14Smaller:
-    lrImagePath = f'Set14_smaller/{i:03d}_LR.png'
+for model in [RBFModel, ExponentialModel, Matern32Model, Matern52Model]:
+  USED_MODEL = model
+  print(f'Using model {USED_MODEL._get_name()}')
+  for i in IMAGE_NUMS:
+    print(f'Processing image {i}')
+    if DATASET == Dataset.Set14:
+      lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
+      gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{USED_MODEL._get_name()}.png'
+    elif DATASET == Dataset.Set14Smaller:
+      lrImagePath = f'Set14_smaller/{i:03d}_LR.png'
+      gprImagePath = f'Set14_smaller/{i:03d}_GPR_{USED_MODEL._get_name()}_{SRF}x.png'
 
-  lrImg = cv2.imread(lrImagePath)
-  
-  gprImg = gprsr(lrImg)
-
-  if DATASET == Dataset.Set14:
-    gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{USED_MODEL._get_name()}.png'
-  elif DATASET == Dataset.Set14Smaller:
-    gprImagePath = f'Set14_smaller/{i:03d}_GPR_{USED_MODEL._get_name()}_{SRF}x.png'
-
-  cv2.imwrite(gprImagePath, gprImg)
+    lrImg = cv2.imread(lrImagePath)
+    
+    gprImg = gprsr(lrImg)
+    cv2.imwrite(gprImagePath, gprImg)

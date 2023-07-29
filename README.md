@@ -1,9 +1,10 @@
 # Gaussian Processes for Super Resolution
+
 This repository contains the code for implementation of the approach outlined in the paper [Single image super-resolution using Gaussian process regression](https://ieeexplore.ieee.org/document/5995713) by He & Siu. As the name suggests, the approach uses Gaussian Process Regression to perform super-resolution on a single image.
 
 The code is written in Python 3.10.12 and uses the [GPytorch](https://gpytorch.ai//) library for Gaussian Process Regression. The code is tested on MacOS 13.4.1.
 
-Test pictures are taken from the Set14 dataset, which was downloaded from [here](https://github.com/jbhuang0604/SelfExSR). These can be found in the `Set14` folder. I have also generated smaller versions of the images, which can be found in the `Set14_smaller` folder.
+Test pictures are taken from the Set14 dataset, which was downloaded from [here](https://github.com/jbhuang0604/SelfExSR). These can be found in the `Set14` folder. I have also generated smaller versions (2x) of the images, which can be found in the `Set14_smaller` folder.
 
 Currently, the following kernels are implemented and tested:
 

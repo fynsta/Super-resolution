@@ -7,14 +7,14 @@ if not os.path.exists(test_data_path):
 
 for i in range(1, 15):
   # Read the image
-  filename = f"Set14/image_SRF_2/img_{i:03d}_SRF_2_LR.png"
+  filename = f"Set14/image_SRF_2/img_{i:03d}_SRF_2_HR.png"
   image = cv2.imread(filename)
 
   # Create data
   lr_image = cv2.resize(image, (image.shape[1] // 4, image.shape[0] // 4))
   cv2.imwrite(test_data_path + f"{i:03d}_LR.png", lr_image)
 
-  for srf in [2, 3, 4, 8]:
+  for srf in [2, 3, 4]:
     hr_image = cv2.resize(image, (lr_image.shape[1] * srf, lr_image.shape[0] * srf))
     cv2.imwrite(test_data_path + f"{i:03d}_HR_{srf}x.png", hr_image)
 

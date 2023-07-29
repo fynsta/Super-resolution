@@ -23,14 +23,14 @@ class RBFModel(BaseModel):
   def _get_name():
     return "RBF"
 
-class MaternModel52(BaseModel):
+class Matern52Model(BaseModel):
   def __init__(self, train_inputs, train_targets, likelihood):
     covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.MaternKernel(nu=2.5))
     super().__init__(train_inputs, train_targets, likelihood, covar_module)
 
   def _get_name():
     return "matern52"
-class MaternModel32(BaseModel):
+class Matern32Model(BaseModel):
   def __init__(self, train_inputs, train_targets, likelihood):
     covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.MaternKernel(nu=1.5))
     super().__init__(train_inputs, train_targets, likelihood, covar_module)
