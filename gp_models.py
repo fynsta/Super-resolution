@@ -11,7 +11,7 @@ class BaseModel(gpytorch.models.ExactGP):
     covar_x = self.covar_module(x)
     return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
   
-  @classmethod
+  @staticmethod
   def _get_name():
     raise NotImplementedError
 
@@ -57,8 +57,8 @@ class PeriodicModel(BaseModel):
 class SpectralMixtureModel(BaseModel):
   def __init__(self, train_inputs, train_targets, likelihood):
     covar_module = gpytorch.kernels.SpectralMixtureKernel(num_mixtures=4, ard_num_dims=8)
+    covar_module.initialize_from_data(train_inputs, train_targets)
     super().__init__(train_inputs, train_targets, likelihood, covar_module)
-    self.covar_module.initialize_from_data(train_inputs, train_targets)
 
   def _get_name():
     return "spectral_mixture"
