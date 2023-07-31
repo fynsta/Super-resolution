@@ -3,6 +3,7 @@ import torch
 import gpytorch
 import numpy as np
 from enum import Enum
+import time
 
 from gp_models import ExponentialModel, Matern32Model, Matern52Model, RBFModel, SpectralMixtureModel
 
@@ -15,18 +16,20 @@ class Dataset(Enum):
   Set14 = 0
   Set14Smaller = 1 # Created with create_smaller_data.py. Same images as Set14, but 4x smaller.
 
+DO_TIMING = True # If True, the algorithm will print the time it took to run for each image.
+
 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
 SRF = 2
 # The dataset to be used for the algorithm
-DATASET = Dataset.Set14Smaller
+DATASET = Dataset.Set14
 # Image numbers to be used from the used dataset (1-14)
-IMAGE_NUMS = range(1, 15)
+IMAGE_NUMS = [1]
 
 USED_COLOR_SPACE = ColorSpace.YUV
 # TODO: Add support for SpectralMixtureModel
 USED_MODEL = Matern32Model # currently supports RBFModel, ExponentialModel, MaternModel32, MaternModel52
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
-USE_PREDEFINED_HYPERS = False # Only for RBF (SpectralMixtureModel does this inherently)
+USE_PREDEFINED_HYPERS = True # Only for RBF (SpectralMixtureModel does this inherently)
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
 STRIDE_PERCENT = 0.8 # STRIDE / PATCH_SIZE
 
@@ -116,7 +119,7 @@ def predict_pixels(training_input, training_target, test_input, scaling_factor):
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
 
-    for _ in range(100):
+    for _ in range(50):
       optimizer.zero_grad()
       output = model(train_x)
       loss = -mll(output, train_y)
@@ -213,6 +216,7 @@ def gprsr_for_channel(img):
 # Available color spaces are BGR, YUV and grayscale (of course, grayscale will result in a black and white image)
 # Note that the paper uses YIQ, but YUV is very similar in that we only upscale the Y channel (and UV are spanning the same space as IQ)
 def gprsr(img):
+  start = time.time()
   if USED_COLOR_SPACE == ColorSpace.GRAYSCALE:
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     imgOut = gprsr_for_channel(img)
@@ -231,25 +235,24 @@ def gprsr(img):
     g = gprsr_for_channel(g)
     r = gprsr_for_channel(r)
     imgOut = cv2.merge((b, g, r))
+  
+  if DO_TIMING:
+    print(f'Time for image: {time.time() - start}')
 
   return imgOut
 
 # Main loop. Loops over all images in the Set14 dataset and applies the GPR-SR algorithm.
 # The paper does not give a dataset, but Set14 is a common benchmark dataset for super resolution.
 # Of course, you can also apply the algorithm to your own images.
-for model in [RBFModel, ExponentialModel, Matern32Model, Matern52Model]:
-  USED_MODEL = model
-  print(f'Using model {USED_MODEL._get_name()}')
-  for i in IMAGE_NUMS:
-    print(f'Processing image {i}')
-    if DATASET == Dataset.Set14:
-      lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
-      gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{USED_MODEL._get_name()}.png'
-    elif DATASET == Dataset.Set14Smaller:
-      lrImagePath = f'Set14_smaller/{i:03d}_LR.png'
-      gprImagePath = f'Set14_smaller/{i:03d}_GPR_{USED_MODEL._get_name()}_{SRF}x.png'
+for i in IMAGE_NUMS:
+  if DATASET == Dataset.Set14:
+    lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
+    gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{USED_MODEL._get_name()}.png'
+  elif DATASET == Dataset.Set14Smaller:
+    lrImagePath = f'Set14_smaller/{i:03d}_LR.png'
+    gprImagePath = f'Set14_smaller/{i:03d}_GPR_{USED_MODEL._get_name()}_{SRF}x.png'
 
-    lrImg = cv2.imread(lrImagePath)
-    
-    gprImg = gprsr(lrImg)
-    cv2.imwrite(gprImagePath, gprImg)
+  lrImg = cv2.imread(lrImagePath)
+  gprImg = gprsr(lrImg)
+  
+  cv2.imwrite(gprImagePath, gprImg)
