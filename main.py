@@ -23,15 +23,15 @@ SRF = 2
 # The dataset to be used for the algorithm
 DATASET = Dataset.Set14
 # Image numbers to be used from the used dataset (1-14)
-IMAGE_NUMS = [1]
+IMAGE_NUMS = [15]
 
 USED_COLOR_SPACE = ColorSpace.YUV
 # TODO: Add support for SpectralMixtureModel
-USED_MODEL = Matern32Model # currently supports RBFModel, ExponentialModel, MaternModel32, MaternModel52
+USED_MODEL = RBFModel # currently supports RBFModel, ExponentialModel, MaternModel32, MaternModel52
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
 USE_PREDEFINED_HYPERS = True # Only for RBF (SpectralMixtureModel does this inherently)
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
-STRIDE_PERCENT = 0.8 # STRIDE / PATCH_SIZE
+STRIDE_PERCENT = 0.9 # STRIDE / PATCH_SIZE
 
 # According to the paper, the patch size should be around 10x the scaling factor for decent results.
 # (Of course a larger patch size is better, but it also takes longer to train.)
@@ -100,6 +100,12 @@ def predict_pixels(training_input, training_target, test_input, scaling_factor):
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
     model = USED_MODEL(train_x, train_y, likelihood)
 
+    if torch.cuda.is_available():
+      train_x = train_x.cuda()
+      train_y = train_y.cuda()
+      model = model.cuda()
+      likelihood = likelihood.cuda()
+
     if USE_PREDEFINED_HYPERS and USED_MODEL == RBFModel:
       # These are the hyperparameters from the paper for the RBF model.
       # I'm not sure if they are really optimal, maybe they did something a little different with the data.
@@ -132,7 +138,11 @@ def predict_pixels(training_input, training_target, test_input, scaling_factor):
     # Use the model to predict the pixels in the test image.
     test_input_patch = extract_patch(test_input, (upsampled_patch_y, upsampled_patch_x), upsampled_patch_size)
     test_x = torch.tensor([extract_neighbors(test_input_patch, y, x) for y in range(1, upsampled_patch_size-1) for x in range(1, upsampled_patch_size-1)])
+    if torch.cuda.is_available():
+      test_x = test_x.cuda()
     test_y = likelihood(model(test_x)).mean
+    if torch.cuda.is_available():
+      test_y = test_y.cpu()
 
     # This is a bit of a hack. We need to fill in the edges of the image, but we don't want to use the model to predict them.
     # So we just use the original (bicubic) upscaling for the edges and fill the interior with the predicted values.
