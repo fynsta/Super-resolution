@@ -8,7 +8,7 @@ import torch
 torch.manual_seed(0)
 torch.set_default_tensor_type(torch.DoubleTensor)
 
-from gp_models import RBFModel
+from gp_models import Matern32Model, RBFModel, PeriodicModel
 
 class ColorSpace(Enum):
   BGR = 0
@@ -19,14 +19,14 @@ class Dataset(Enum):
   Set14 = 0
   Set14Smaller = 1 # Created with create_smaller_data.py. Same images as Set14, but 4x smaller.
 
-SRF = 2 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
+SRF = 4 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
 DATASET = Dataset.Set14 # The dataset to be used for the algorithm
-IMAGE_NUMS = [1] # Image numbers to be used from the used dataset (1-14)
+IMAGE_NUMS = [2] # Image numbers to be used from the used dataset (1-14)
 DO_TIMING = True # Whether to print the time it takes to upscale each image
 
 USED_COLOR_SPACE = ColorSpace.YUV # Color space to be used for the algorithm
 # TODO: Add support for SpectralMixtureModel
-USED_MODEL = RBFModel # currently supports RBFModel, ExponentialModel, MaternModel32, MaternModel52
+USED_MODEL = Matern32Model # currently supports RBFModel, ExponentialModel, Matern32Model, Matern52Model52
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
 STRIDE_PERCENTAGE = 0.9 # STRIDE / PATCH_SIZE. A little less than 1 to avoid edge effects.
@@ -61,10 +61,9 @@ class GPRSR:
     elif self.color_mode == ColorSpace.YUV:
       img_in_yuv = cv.cvtColor(lr_image, cv.COLOR_BGR2YUV)
       y, u, v = cv.split(img_in_yuv)
+      y = self.apply_for_channel(y)
       u = cv.resize(u, None, fx=self.scaling_factor, fy=self.scaling_factor, interpolation=cv.INTER_CUBIC)
       v = cv.resize(v, None, fx=self.scaling_factor, fy=self.scaling_factor, interpolation=cv.INTER_CUBIC)
-
-      y = self.apply_for_channel(y)
       img_out_yuv = cv.merge((y, u, v))
       img_out = cv.cvtColor(img_out_yuv, cv.COLOR_YUV2BGR)
     else:
