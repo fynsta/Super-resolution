@@ -3,7 +3,7 @@
 SRF=${1:-2}
 DATASET=${2:-"Set14"}
 
-types=("bicubic" "GPR_RBF" "GPR_exponential" "GPR_matern32" "GPR_periodic") # ("nearest" "ScSR" "SelfExSR" "SRCNN" "glasner" "Kim")
+types=("bicubic" "GPR_RBF" "GPR_RBF_b" "GPR_exponential" "GPR_matern32" "GPR_matern32_b" "GPR_periodic" "GPR_spectral_mixture") # ("nearest" "ScSR" "SelfExSR" "SRCNN" "glasner" "Kim")
 
 get_image_path() {
   local image="$1"

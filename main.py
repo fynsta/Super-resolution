@@ -8,7 +8,7 @@ import torch
 torch.manual_seed(0)
 torch.set_default_tensor_type(torch.DoubleTensor)
 
-from gp_models import Matern32Model, RBFModel, PeriodicModel
+from gp_models import Matern32Model, RBFModel, PeriodicModel, SpectralMixtureModel
 
 class ColorSpace(Enum):
   BGR = 0
@@ -19,9 +19,13 @@ class Dataset(Enum):
   Set14 = 0
   Set14Smaller = 1 # Created with create_smaller_data.py. Same images as Set14, but 4x smaller.
 
-SRF = 4 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
+class PatchInterpolation(Enum):
+  AVERAGE = 0
+  BILINEAR = 1
+
+SRF = 2 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
 DATASET = Dataset.Set14 # The dataset to be used for the algorithm
-IMAGE_NUMS = [2] # Image numbers to be used from the used dataset (1-14)
+IMAGE_NUMS = range(2, 15) # Image numbers to be used from the used dataset (1-14)
 DO_TIMING = True # Whether to print the time it takes to upscale each image
 
 USED_COLOR_SPACE = ColorSpace.YUV # Color space to be used for the algorithm
@@ -30,6 +34,7 @@ USED_MODEL = Matern32Model # currently supports RBFModel, ExponentialModel, Mate
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
 STRIDE_PERCENTAGE = 0.9 # STRIDE / PATCH_SIZE. A little less than 1 to avoid edge effects.
+PATCH_INTERPOLATION = PatchInterpolation.BILINEAR # How to interpolate the results of overlapping patches
 
 # Extracts a patch from the image, with the given indices as the top left corner.
 # Note that the patch is copied, so changing the patch does not change the image.
@@ -187,15 +192,18 @@ class GPRSR:
         model = model.cuda()
         likelihood = likelihood.cuda()
 
+      hypers = {
+        'likelihood.noise_covar.noise': torch.tensor(0.001),
+        'mean_module.constant': train_y.float().mean()
+      }
       if self.used_model == RBFModel:
         # These are the hyperparameters from the paper for the RBF model.
-        hypers = {
-          'likelihood.noise_covar.noise': torch.tensor(0.001),
+        hypers.update({
           'covar_module.base_kernel.lengthscale': torch.tensor(0.223),
           'covar_module.outputscale': train_y.float().var(),
-          'mean_module.constant': train_y.float().mean()
-        }
-        model.initialize(**hypers)
+        })
+      
+      model.initialize(**hypers)
 
       model.train()
       likelihood.train()
@@ -226,11 +234,11 @@ class GPRSR:
       test_input_patch[1:-1, 1:-1] = test_y.reshape(upsampled_patch_size-2, upsampled_patch_size-2).detach().numpy()
       upsampled_patches.append(test_input_patch)
 
-
     # Now we need to combine the patches into a single image.
     # Overlapping patches are averaged together.
     upsampled = np.zeros(test_input.shape)
-    overlapped_counter = np.zeros(test_input.shape)
+    weights_sum = np.zeros(test_input.shape)
+    #overlapped_counter = np.zeros(test_input.shape)
     for (y, x), upsampled_patch in zip(upsampled_patch_indices, upsampled_patches):    
       # Considerations for edges. Since they are not predicted by the model, they should not be used.
       # Except at the edge of the image, where they are used to fill in the missing pixels.
@@ -242,15 +250,23 @@ class GPRSR:
 
       for j in range(y_start, y_end):
         for k in range(x_start, x_end):
-          upsampled[y+j, x+k] += upsampled_patch[j, k]
-          overlapped_counter[y+j, x+k] += 1
+          if PATCH_INTERPOLATION == PatchInterpolation.AVERAGE:
+            weight = 1
+          elif PATCH_INTERPOLATION == PatchInterpolation.BILINEAR:
+            vertical_weight = 1 - np.abs(1/2 - j/upsampled_patch_size)
+            horizontal_weight = 1 - np.abs(1/2 - k/upsampled_patch_size)
+            weight = vertical_weight * horizontal_weight
 
-    upsampled /= overlapped_counter
+          upsampled[y+j, x+k] += upsampled_patch[j, k] * weight
+          weights_sum[y+j, x+k] += weight
+
+    upsampled /= weights_sum
 
     # Clip the values to be between 0 and 1 (valid pixel values), because the model might predict values outside of this range.
     upsampled = np.clip(upsampled, 0, 1)
 
     return upsampled
+
 
 
 # Main loop. Loops over all images in the Set14 dataset and applies the GPR-SR algorithm.

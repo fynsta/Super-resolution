@@ -6,7 +6,7 @@ DATASET=${2:-"Set14"}
 declare -a types
 
 if [ "$DATASET" == "Set14" ]; then
-  types=("bicubic" "glasner" "Kim" "nearest" "ScSR" "SelfExSR" "SRCNN" "GPR_RBF" "GPR_matern32")
+  types=("bicubic" "glasner" "Kim" "nearest" "ScSR" "SelfExSR" "SRCNN" "GPR_RBF" "GPR_matern32" "GPR_matern32_b")
 else
   types=("bicubic" "GPR_RBF" "GPR_exponential" "GPR_matern32" "GPR_matern52"  )
 fi

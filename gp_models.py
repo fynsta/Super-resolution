@@ -57,7 +57,7 @@ class PeriodicModel(BaseModel):
 class SpectralMixtureModel(BaseModel):
   def __init__(self, train_inputs, train_targets, likelihood):
     covar_module = gpytorch.kernels.SpectralMixtureKernel(num_mixtures=4, ard_num_dims=8)
-    covar_module.initialize_from_data(train_inputs, train_targets)
+    #covar_module.initialize_from_data(train_inputs, train_targets)
     super().__init__(train_inputs, train_targets, likelihood, covar_module)
 
   def _get_name():
