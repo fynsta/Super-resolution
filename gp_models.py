@@ -30,6 +30,7 @@ class Matern52Model(BaseModel):
 
   def _get_name():
     return "matern52"
+
 class Matern32Model(BaseModel):
   def __init__(self, train_inputs, train_targets, likelihood):
     covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.MaternKernel(nu=1.5))

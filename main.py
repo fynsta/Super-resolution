@@ -8,7 +8,7 @@ import torch
 torch.manual_seed(0)
 torch.set_default_tensor_type(torch.DoubleTensor)
 
-from gp_models import Matern32Model, RBFModel, PeriodicModel, SpectralMixtureModel
+from gp_models import Matern32Model, Matern52Model, RBFModel, PeriodicModel, SpectralMixtureModel #type: ignore
 
 class ColorSpace(Enum):
   BGR = 0
@@ -25,12 +25,11 @@ class PatchInterpolation(Enum):
 
 SRF = 2 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
 DATASET = Dataset.Set14 # The dataset to be used for the algorithm
-IMAGE_NUMS = range(2, 15) # Image numbers to be used from the used dataset (1-14)
+IMAGE_NUMS = range(1,15) # Image numbers to be used from the used dataset (1-14)
 DO_TIMING = True # Whether to print the time it takes to upscale each image
 
-USED_COLOR_SPACE = ColorSpace.YUV # Color space to be used for the algorithm
-# TODO: Add support for SpectralMixtureModel
-USED_MODEL = Matern32Model # currently supports RBFModel, ExponentialModel, Matern32Model, Matern52Model52
+USED_COLOR_SPACE = ColorSpace.BGR # Color space to be used for the algorithm
+USED_MODEL = Matern32Model # currently supports RBFModel, ExponentialModel, Matern32Model, Matern52Model52, SpectralMixtureModel
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
 STRIDE_PERCENTAGE = 0.9 # STRIDE / PATCH_SIZE. A little less than 1 to avoid edge effects.

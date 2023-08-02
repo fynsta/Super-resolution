@@ -2,7 +2,7 @@ from collections import defaultdict
 import cv2
 import os
 from skimage import metrics
-from gp_models import RBFModel, ExponentialModel, Matern32Model, Matern52Model
+from gp_models import RBFModel, ExponentialModel, Matern32Model, Matern52Model, SpectralMixtureModel
 
 def get_metrics(hrImgGray, upsampledImgGray, name):
   psnr = metrics.peak_signal_noise_ratio(hrImgGray, upsampledImgGray)
@@ -18,13 +18,13 @@ def evaluate_image(i, srf):
   hrImg = cv2.imread(hrImagePath)
   hrImgGray = cv2.cvtColor(hrImg, cv2.COLOR_BGR2GRAY)[srf:-srf, srf:-srf]
 
-  bicubicImagePath = f'Set14/image_SRF_{srf}/img_{i:03d}_SRF_{srf}_Bicubic.png'
+  bicubicImagePath = f'Set14/image_SRF_{srf}/img_{i:03d}_SRF_{srf}_bicubic.png'
   bicubicImg = cv2.imread(bicubicImagePath)
   bicubicImgGray = cv2.cvtColor(bicubicImg, cv2.COLOR_BGR2GRAY)[srf:-srf, srf:-srf]
   metrics = get_metrics(hrImgGray, bicubicImgGray, 'Bicubic (Baseline)')
   values['Bicubic (Baseline)'] = metrics
 
-  for model in [RBFModel, ExponentialModel, Matern32Model, Matern52Model]:
+  for model in [RBFModel, ExponentialModel, Matern32Model, Matern52Model, SpectralMixtureModel]:
     gprImagePath = f'Set14/image_SRF_{srf}/img_{i:03d}_SRF_{srf}_GPR_{model._get_name()}.png'
     if not(os.path.exists(gprImagePath)):
       continue
@@ -46,5 +46,7 @@ def evaluate(srf):
       previous_ssims, previous_psnrs = metrics[key]
       metrics[key] = (previous_ssims + value[1], previous_psnrs + value[0])
   
+  print('Averages')
   for key, value in metrics.items():
     print(f'{key} - PSNR: {value[0]/14:.3f}, SSIM: {value[1]/14:.3f}')
+
