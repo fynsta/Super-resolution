@@ -1,14 +1,16 @@
 from enum import Enum
+import os
 import time
 import cv2 as cv
 import gpytorch
 import numpy as np
 import torch
+from evaluation import Evaluator, PerceptualSimilarityMetric
 
 torch.manual_seed(0)
 torch.set_default_tensor_type(torch.DoubleTensor)
 
-from gp_models import Matern32Model, Matern52Model, RBFModel, PeriodicModel, SpectralMixtureModel #type: ignore
+from gp_models import MaternWithPeriodic, Matern32Model, Matern52Model, RBFModel, PeriodicModel, SpectralMixtureModel #type: ignore
 
 class ColorSpace(Enum):
   BGR = 0
@@ -28,8 +30,8 @@ DATASET = Dataset.Set14 # The dataset to be used for the algorithm
 IMAGE_NUMS = range(1,15) # Image numbers to be used from the used dataset (1-14)
 DO_TIMING = True # Whether to print the time it takes to upscale each image
 
-USED_COLOR_SPACE = ColorSpace.BGR # Color space to be used for the algorithm
-USED_MODEL = Matern32Model # currently supports RBFModel, ExponentialModel, Matern32Model, Matern52Model52, SpectralMixtureModel
+USED_COLOR_SPACE = ColorSpace.YUV # Color space to be used for the algorithm
+USED_MODEL = MaternWithPeriodic # currently supports RBFModel, ExponentialModel, Matern32Model, Matern52Model52, SpectralMixtureModel
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
 STRIDE_PERCENTAGE = 0.9 # STRIDE / PATCH_SIZE. A little less than 1 to avoid edge effects.
@@ -272,16 +274,17 @@ class GPRSR:
 # The paper does not give a dataset, but Set14 is a common benchmark dataset for super resolution.
 # Of course, you can also apply the algorithm to your own images.
 
-GPRSR = GPRSR(SRF, USED_MODEL, USED_COLOR_SPACE)
-for i in IMAGE_NUMS:
-  if DATASET == Dataset.Set14:
-    lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
-    gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{USED_MODEL._get_name()}.png'
-  elif DATASET == Dataset.Set14Smaller:
-    lrImagePath = f'Set14_smaller/{i:03d}_LR.png'
-    gprImagePath = f'Set14_smaller/{i:03d}_GPR_{USED_MODEL._get_name()}_{SRF}x.png'
+if __name__ == '__main__':
+  gprsr = GPRSR(SRF, USED_MODEL, USED_COLOR_SPACE)
+  for i in IMAGE_NUMS:
+    if DATASET == Dataset.Set14:
+      lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
+      gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{USED_MODEL._get_name()}.png'
+    elif DATASET == Dataset.Set14Smaller:
+      lrImagePath = f'Set14_smaller/{i:03d}_LR.png'
+      gprImagePath = f'Set14_smaller/{i:03d}_GPR_{USED_MODEL._get_name()}_{SRF}x.png'
 
-  lrImg = cv.imread(lrImagePath)
-  gprImg = GPRSR.apply(lrImg)
-  
-  cv.imwrite(gprImagePath, gprImg)
+    lrImg = cv.imread(lrImagePath)
+    gprImg = gprsr.apply(lrImg)
+    
+    cv.imwrite(gprImagePath, gprImg)
