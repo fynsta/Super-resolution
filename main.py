@@ -6,6 +6,7 @@ import gpytorch
 import numpy as np
 import torch
 from evaluation import Evaluator, PerceptualSimilarityMetric
+from image_patches import PatchHandler, PatchInterpolationMode
 
 torch.manual_seed(0)
 torch.set_default_tensor_type(torch.DoubleTensor)
@@ -21,13 +22,9 @@ class Dataset(Enum):
   Set14 = 0
   Set14Smaller = 1 # Created with create_smaller_data.py. Same images as Set14, but 4x smaller.
 
-class PatchInterpolation(Enum):
-  AVERAGE = 0
-  BILINEAR = 1
-
 SRF = 2 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
 DATASET = Dataset.Set14 # The dataset to be used for the algorithm
-IMAGE_NUMS = range(1,15) # Image numbers to be used from the used dataset (1-14)
+IMAGE_NUMS = [0] # Image numbers to be used from the used dataset (1-14)
 DO_TIMING = True # Whether to print the time it takes to upscale each image
 
 USED_COLOR_SPACE = ColorSpace.YUV # Color space to be used for the algorithm
@@ -35,7 +32,7 @@ USED_MODEL = MaternWithPeriodic # currently supports RBFModel, ExponentialModel,
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
 STRIDE_PERCENTAGE = 0.9 # STRIDE / PATCH_SIZE. A little less than 1 to avoid edge effects.
-PATCH_INTERPOLATION = PatchInterpolation.BILINEAR # How to interpolate the results of overlapping patches
+PATCH_INTERPOLATION = PatchInterpolationMode.BILINEAR # How to interpolate the results of overlapping patches
 
 # Extracts a patch from the image, with the given indices as the top left corner.
 # Note that the patch is copied, so changing the patch does not change the image.
@@ -45,7 +42,6 @@ def extract_patch(img, y, x, patch_size):
 # Extracts the 8 neighbors of the pixel at the given indices.
 def extract_neighbors(img, y, x):
   return [img[y_val, x_val] for y_val, x_val in [(y+1, x), (y-1, x), (y, x+1), (y, x-1), (y+1, x+1), (y-1, x-1), (y+1, x-1), (y-1, x+1)]]
-
 
 class GPRSR:
   def __init__(self, scaling_factor, used_model, color_mode):
@@ -141,30 +137,8 @@ class GPRSR:
     # According to the paper, the patch size should be around 10x the scaling factor for decent results.
     # (Of course a larger patch size is better, but it also takes longer to train.)
     patch_size = int(self.current_scaling_factor * 10)
-    upsampled_patch_size = int(patch_size * self.current_scaling_factor)
+    patch_handler = PatchHandler(images = [training_input, training_target, test_input], base_patch_size=patch_size, stride_percentage=STRIDE_PERCENTAGE)
 
-    # The stride is the distance between two patches, both horizontally and vertically.
-    # Note that we need to subtract 2 from the patch size to account for the edges (which are not predicted).
-    # The paper uses an overlap of 66% overall (which means a stride rate of around 0.8 according to my rough calculations)
-    stride = int((patch_size-2) * STRIDE_PERCENTAGE)
-
-    assert patch_size <= training_input.shape[0], f'Patch size {patch_size} is larger than image size {training_input.shape[0]}'
-
-    # Calculating the indices of the patches to be used for training.
-    # Patches that would go out of bounds are not used are moved to the interior so that they are within bounds.
-    patch_indices = []
-    for x in range(0, training_input.shape[1] - 1, stride):
-      if x + patch_size > training_input.shape[1]:
-        x = training_input.shape[1] - patch_size
-      for y in range(0, training_input.shape[0] - 1, stride):
-        if y + patch_size > training_input.shape[0]:
-          y = training_input.shape[0] - patch_size
-
-        patch_indices.append((y, x))
-
-    # Obviously, the upsampled patch indices are just the patch indices multiplied by the scaling factor.
-    upsampled_patch_indices = [(int(y*self.current_scaling_factor), int(x*self.current_scaling_factor)) for y, x in patch_indices]
-    
     # Calculate the indices of the training pixels inside the patch.
     # The paper uses a grid pattern to speed up computation, but we can also use all pixels
     if USE_ALL_PIXELS_FOR_TRAINING:
@@ -176,11 +150,10 @@ class GPRSR:
 
     # The main loop. For each patch, we train a model and predict the pixels in the test image.
     upsampled_patches = []
-    for (patch_y, patch_x), (upsampled_patch_y, upsampled_patch_x) in zip(patch_indices, upsampled_patch_indices):
-      # Extract the training data from the patch.
-      training_input_patch = extract_patch(training_input, patch_y, patch_x, patch_size)
-      training_target_patch = extract_patch(training_target, patch_y, patch_x, patch_size)
+    for training_input_patch, training_target_patch, test_input_patch in patch_handler:
+      # Training data is the 8 neighbors of the training pixels.
       train_x = torch.tensor([extract_neighbors(training_input_patch, y, x) for y, x in training_points])
+      # Training labels are the training pixel values themselves.
       train_y = torch.tensor([training_target_patch[y, x] for y, x in training_points])
 
       # Initialize the model and train it.
@@ -222,8 +195,7 @@ class GPRSR:
       likelihood.eval()
 
       # Use the model to predict the pixels in the test image.
-      test_input_patch = extract_patch(test_input, upsampled_patch_y, upsampled_patch_x, upsampled_patch_size)
-      test_x = torch.tensor([extract_neighbors(test_input_patch, y, x) for y in range(1, upsampled_patch_size-1) for x in range(1, upsampled_patch_size-1)])
+      test_x = torch.tensor([extract_neighbors(test_input_patch, y, x) for y in range(1, test_input_patch.shape[0]-1) for x in range(1, test_input_patch.shape[0]-1)])
       if torch.cuda.is_available():
         test_x = test_x.cuda()
       test_y = likelihood(model(test_x)).mean
@@ -232,42 +204,16 @@ class GPRSR:
 
       # This is a bit of a hack. We need to fill in the edges of the image, but we don't want to use the model to predict them.
       # So we just use the original (bicubic) upscaling for the edges and fill the interior with the predicted values.
-      test_input_patch[1:-1, 1:-1] = test_y.reshape(upsampled_patch_size-2, upsampled_patch_size-2).detach().numpy()
+      test_input_patch[1:-1, 1:-1] = test_y.reshape(test_input_patch.shape[0]-2, test_input_patch.shape[0]-2).detach().numpy()
       upsampled_patches.append(test_input_patch)
 
-    # Now we need to combine the patches into a single image.
-    # Overlapping patches are averaged together.
-    upsampled = np.zeros(test_input.shape)
-    weights_sum = np.zeros(test_input.shape)
-    #overlapped_counter = np.zeros(test_input.shape)
-    for (y, x), upsampled_patch in zip(upsampled_patch_indices, upsampled_patches):    
-      # Considerations for edges. Since they are not predicted by the model, they should not be used.
-      # Except at the edge of the image, where they are used to fill in the missing pixels.
-      # These values are straight from the original (bicubic) upscaling.
-      x_start = 0 if x == 0 else 1
-      y_start = 0 if y == 0 else 1
-      x_end = upsampled_patch_size if x + upsampled_patch_size == upsampled.shape[1] else upsampled_patch_size - 1
-      y_end = upsampled_patch_size if y + upsampled_patch_size == upsampled.shape[0] else upsampled_patch_size - 1
-
-      for j in range(y_start, y_end):
-        for k in range(x_start, x_end):
-          if PATCH_INTERPOLATION == PatchInterpolation.AVERAGE:
-            weight = 1
-          elif PATCH_INTERPOLATION == PatchInterpolation.BILINEAR:
-            vertical_weight = 1 - np.abs(1/2 - j/upsampled_patch_size)
-            horizontal_weight = 1 - np.abs(1/2 - k/upsampled_patch_size)
-            weight = vertical_weight * horizontal_weight
-
-          upsampled[y+j, x+k] += upsampled_patch[j, k] * weight
-          weights_sum[y+j, x+k] += weight
-
-    upsampled /= weights_sum
+    # Rebuild the image from the patches.
+    upsampled = patch_handler.combine_patches(upsampled_patches, PATCH_INTERPOLATION,)
 
     # Clip the values to be between 0 and 1 (valid pixel values), because the model might predict values outside of this range.
     upsampled = np.clip(upsampled, 0, 1)
 
     return upsampled
-
 
 
 # Main loop. Loops over all images in the Set14 dataset and applies the GPR-SR algorithm.
