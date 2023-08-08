@@ -1,17 +1,15 @@
 from enum import Enum
-import os
 import time
 import cv2 as cv
 import gpytorch
 import numpy as np
+from sympy import Ge
 import torch
-from evaluation import Evaluator, PerceptualSimilarityMetric
 from image_patches import PatchHandler, PatchInterpolationMode
+from kernels import GeneralModel, get_kernel_name, matern32_kernel, matern52_kernel
 
 torch.manual_seed(0)
 torch.set_default_tensor_type(torch.DoubleTensor)
-
-from gp_models import MaternWithPeriodic, Matern32Model, Matern52Model, RBFModel, PeriodicModel, SpectralMixtureModel #type: ignore
 
 class ColorSpace(Enum):
   BGR = 0
@@ -28,7 +26,7 @@ IMAGE_NUMS = [0] # Image numbers to be used from the used dataset (1-14)
 DO_TIMING = True # Whether to print the time it takes to upscale each image
 
 USED_COLOR_SPACE = ColorSpace.YUV # Color space to be used for the algorithm
-USED_MODEL = MaternWithPeriodic # currently supports RBFModel, ExponentialModel, Matern32Model, Matern52Model52, SpectralMixtureModel
+USED_KERNEL = matern52_kernel # supports all kernels from kernels.py
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
 STRIDE_PERCENTAGE = 0.9 # STRIDE / PATCH_SIZE. A little less than 1 to avoid edge effects.
@@ -44,9 +42,10 @@ def extract_neighbors(img, y, x):
   return [img[y_val, x_val] for y_val, x_val in [(y+1, x), (y-1, x), (y, x+1), (y, x-1), (y+1, x+1), (y-1, x-1), (y+1, x-1), (y-1, x+1)]]
 
 class GPRSR:
-  def __init__(self, scaling_factor, used_model, color_mode):
+  def __init__(self, scaling_factor, used_kernel, color_mode):
     self.scaling_factor = scaling_factor
-    self.used_model = used_model
+    self.current_scaling_factor = None # Used to keep track of the current scaling factor in the algorithm
+    self.used_kernel = used_kernel
     self.color_mode = color_mode
 
   # Apply GPR-SR algorithm for a single image.
@@ -107,7 +106,7 @@ class GPRSR:
     return (img * 255).astype(np.uint8)
   
   # The UPSAMPLE step in the paper.
-  # Upsamples the image using bicubic interpolation, then uses the model to predict the pixels 
+  # Upsamples the image using bicubic interpolation, then tries to predict the pixels 
   # based on data learned from the low resolution image.
   def upsample(self, img):
     bicubic = cv.resize(img, None, fx=self.current_scaling_factor, fy=self.current_scaling_factor, interpolation=cv.INTER_CUBIC)
@@ -123,7 +122,7 @@ class GPRSR:
     return img
 
   # The DEBLUR step in the paper.
-  # Uses the model to predict the pixels in the high resolution image based on the downsampled blurred image.
+  # Tries to predict the pixels in the high resolution image based on the downsampled blurred image.
   # Patches are exactly the same as in the UPSAMPLE step.
   def deblur(self, blurred_high, blurred_low, low):
     return self.predict_pixels(blurred_low, low, blurred_high)
@@ -148,7 +147,7 @@ class GPRSR:
     
     training_points = [(y, x) for y in training_indices for x in training_indices]
 
-    # The main loop. For each patch, we train a model and predict the pixels in the test image.
+    # The main loop. For each patch, we train a GPR model and predict the pixels in the test image.
     upsampled_patches = []
     for training_input_patch, training_target_patch, test_input_patch in patch_handler:
       # Training data is the 8 neighbors of the training pixels.
@@ -158,7 +157,7 @@ class GPRSR:
 
       # Initialize the model and train it.
       likelihood = gpytorch.likelihoods.GaussianLikelihood()
-      model = self.used_model(train_x, train_y, likelihood)
+      model = GeneralModel(self.used_kernel, train_x, train_y, likelihood)
 
       if torch.cuda.is_available():
         train_x = train_x.cuda()
@@ -170,8 +169,9 @@ class GPRSR:
         'likelihood.noise_covar.noise': torch.tensor(0.001),
         'mean_module.constant': train_y.float().mean()
       }
-      if self.used_model == RBFModel:
-        # These are the hyperparameters from the paper for the RBF model.
+
+      if get_kernel_name(self.used_kernel) == 'RBF':
+        # These are the hyperparameters advised by the paper (only for the RBF kernel)
         hypers.update({
           'covar_module.base_kernel.lengthscale': torch.tensor(0.223),
           'covar_module.outputscale': train_y.float().var(),
@@ -221,14 +221,15 @@ class GPRSR:
 # Of course, you can also apply the algorithm to your own images.
 
 if __name__ == '__main__':
-  gprsr = GPRSR(SRF, USED_MODEL, USED_COLOR_SPACE)
+  gprsr = GPRSR(SRF, USED_KERNEL, USED_COLOR_SPACE)
+  kernel_name = get_kernel_name(USED_KERNEL)
   for i in IMAGE_NUMS:
     if DATASET == Dataset.Set14:
       lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
-      gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{USED_MODEL._get_name()}.png'
+      gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{kernel_name}.png'
     elif DATASET == Dataset.Set14Smaller:
       lrImagePath = f'Set14_smaller/{i:03d}_LR.png'
-      gprImagePath = f'Set14_smaller/{i:03d}_GPR_{USED_MODEL._get_name()}_{SRF}x.png'
+      gprImagePath = f'Set14_smaller/{i:03d}_GPR_{kernel_name}_{SRF}x.png'
 
     lrImg = cv.imread(lrImagePath)
     gprImg = gprsr.apply(lrImg)

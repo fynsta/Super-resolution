@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from evaluation import Evaluator, PerceptualSimilarityMetric
 from main import SRF, USE_ALL_PIXELS_FOR_TRAINING, USED_COLOR_SPACE, IMAGE_NUMS, GPRSR, extract_neighbors, extract_patch
-from gp_models import GeneralModel
+from kernels import GeneralModel, rbf_kernel, matern52_kernel, matern32_kernel, exponential_kernel, periodic_kernel, spectral_mixture_kernel, linear_kernel
 
 from gpytorch.kernels import AdditiveKernel, RBFKernel, MaternKernel, PeriodicKernel, ScaleKernel, LinearKernel
 from gpytorch.likelihoods import GaussianLikelihood
@@ -89,15 +89,14 @@ class AutomaticModelConstructor():
     return True
 
   def get_accuracy(self, kernel):
-    model = GeneralModel(self.train_x, self.train_y, self.likelihood, kernel)
+    model = self.get_model(kernel)
     
     return np.random.random()
-    # model = GeneralModel(self.train_x, self.train_y, self.likelihood, kernel)
     # gprsr = GPRSR(SRF, model, USED_COLOR_SPACE)
 
     # for i in IMAGE_NUMS:
     #   lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
-    #   gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{model._get_name()}.png'
+    #   gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{get_kernel_name(kernel)}.png'
     #   if os.path.exists(gprImagePath):
     #     continue
 
@@ -108,12 +107,12 @@ class AutomaticModelConstructor():
 
     # ssim = self.evaluator.evaluate_metric(model, PerceptualSimilarityMetric.SSIM)
     # if self.verbose:
-    #   print(f'{model._get_name()} - SSIM: {ssim:.3f}')
+    #   print(f'{get_kernel_name(kernel)} - SSIM: {ssim:.3f}')
 
     # return ssim
 
   def get_model(self, kernel):
-    return GeneralModel(self.train_x, self.train_y, self.likelihood, kernel)
+    return GeneralModel(kernel, self.train_x, self.train_y, self.likelihood)
 
 if __name__ == '__main__':
   image_path = f'Set14/image_SRF_{SRF}/img_001_SRF_{SRF}_LR.png'
@@ -133,11 +132,12 @@ if __name__ == '__main__':
   
   likelihood = GaussianLikelihood()
   m = AutomaticModelConstructor([
-    ScaleKernel(RBFKernel()),
-    MaternKernel(nu=2.5),
-    MaternKernel(nu=1.5),
-    MaternKernel(nu=0.5),
-    PeriodicKernel(),
-    LinearKernel(),
+    rbf_kernel,
+    matern52_kernel,
+    matern32_kernel,
+    # exponential_kernel,
+    periodic_kernel,
+    # spectral_mixture_kernel,
+    linear_kernel
   ], train_x, train_y, likelihood, verbose=True)
   m.run()

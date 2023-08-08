@@ -4,7 +4,7 @@ from typing import NamedTuple
 import cv2
 import os
 from skimage import metrics
-from gp_models import GeneralModel, RBFModel, ExponentialModel, Matern32Model, Matern52Model, SpectralMixtureModel
+from kernels import get_kernel_name, rbf_kernel, exponential_kernel, matern32_kernel, matern52_kernel, spectral_mixture_kernel
 
 class PerceptualSimilarityMetric(Enum):
   PSNR = 1
@@ -38,8 +38,8 @@ class Evaluator:
   def get_bicubic_image(self, i):
     return self.get_image(i, 'bicubic')
   
-  def get_gpr_image(self, i, model):
-    return self.get_image(i, f'GPR_{model._get_name()}', fail_on_nonexistent=False)
+  def get_gpr_image(self, i, kernel_name):
+    return self.get_image(i, f'GPR_{kernel_name}', fail_on_nonexistent=False)
 
   def get_image(self, i, method, fail_on_nonexistent=True):
     image_path = f'Set14/image_SRF_{self.srf}/img_{i:03d}_SRF_{self.srf}_{method}.png'
@@ -67,24 +67,27 @@ class Evaluator:
     bicubic_image = self.get_bicubic_image(i)
     self.metrics['Bicubic (Baseline)'] += self.get_metrics(hr_image, bicubic_image, 'Bicubic (Baseline)')
 
-    for model in [RBFModel, ExponentialModel, Matern32Model, Matern52Model, SpectralMixtureModel, GeneralModel]:
-      gpr_image = self.get_gpr_image(i, model)
+    for kernel in [rbf_kernel, exponential_kernel, matern32_kernel, matern52_kernel, spectral_mixture_kernel]:
+      kernel_name = get_kernel_name(kernel)
+      gpr_image = self.get_gpr_image(i, kernel_name)
       if gpr_image is not None:
-        self.metrics[model._get_name()] += self.get_metrics(hr_image, gpr_image, model._get_name())
+        self.metrics[kernel_name] += self.get_metrics(hr_image, gpr_image, kernel_name)
 
     if self.verbose:
       print()
 
-  def evaluate_metric(self, model, metric):
+  def evaluate_metric(self, kernel, metric):
+    kernel_name = get_kernel_name(kernel)
+
     result = PerceptualSimilarity(0,0,0)
     for i in range(1, 15):
       hr_image = self.get_hr_image(i)
-      upsampled_image = self.get_gpr_image(i, model)
-      result += self.get_metrics(hr_image, upsampled_image, model._get_name())
+      upsampled_image = self.get_gpr_image(i, kernel_name)
+      result += self.get_metrics(hr_image, upsampled_image, kernel_name)
     
     result = result.average()
     if self.verbose:
-      print(f'{model._get_name()} - PSNR: {result.psnr:.3f}, SSIM: {result.ssim:.3f}')
+      print(f'{kernel_name} - PSNR: {result.psnr:.3f}, SSIM: {result.ssim:.3f}')
 
     if metric == PerceptualSimilarityMetric.PSNR:
       return result.psnr

@@ -72,7 +72,6 @@ class PatchHandler:
           result[x + i, y + j] += patch[i, j] * weight
           weights[x + i, y + j] += weight
       
-    print(np.min(weights), np.max(weights))
     result /= weights
     return result
 
