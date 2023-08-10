@@ -108,3 +108,14 @@ class PatchIterator:
 
 def aspect_ratio(tuple):
   return tuple[0] / tuple[1]
+
+
+### Methods from "Image super-resolution using non-local Gaussian process regression"
+
+def normalize_patch(patch, prediction):
+  norm = np.linalg.norm(patch)
+  return patch/norm, prediction/norm
+
+def restore_normalized_patch(normalized_patch, original_patch):
+  norm = np.linalg.norm(original_patch)
+  return normalized_patch * norm

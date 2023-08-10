@@ -9,6 +9,9 @@ from kernels import GeneralModel, rbf_kernel, matern52_kernel, matern32_kernel, 
 from gpytorch.kernels import AdditiveKernel, RBFKernel, MaternKernel, PeriodicKernel, ScaleKernel, LinearKernel
 from gpytorch.likelihoods import GaussianLikelihood
 
+### Automatic model finder according to Duvenaud's paper
+# Still WIP because I have not implemented the accuracy function yet
+
 class AutomaticModelConstructor():
   # base_kernels: list of kernels to be used as base kernels
   # train_x: training data
@@ -92,6 +95,8 @@ class AutomaticModelConstructor():
     model = self.get_model(kernel)
     
     return np.random.random()
+    # TODO: What to use for accuracy? SSIM of the generated images? Or the marginal likelihood of the model?
+
     # gprsr = GPRSR(SRF, model, USED_COLOR_SPACE)
 
     # for i in IMAGE_NUMS:

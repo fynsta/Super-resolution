@@ -4,7 +4,7 @@ from typing import NamedTuple
 import cv2
 import os
 from skimage import metrics
-from kernels import get_kernel_name, rbf_kernel, exponential_kernel, matern32_kernel, matern52_kernel, spectral_mixture_kernel
+from kernels import get_kernel_name, rbf_kernel, exponential_kernel, matern32_kernel, matern52_kernel, spectral_mixture_kernel, linear_kernel
 
 class PerceptualSimilarityMetric(Enum):
   PSNR = 1
@@ -67,7 +67,7 @@ class Evaluator:
     bicubic_image = self.get_bicubic_image(i)
     self.metrics['Bicubic (Baseline)'] += self.get_metrics(hr_image, bicubic_image, 'Bicubic (Baseline)')
 
-    for kernel in [rbf_kernel, exponential_kernel, matern32_kernel, matern52_kernel, spectral_mixture_kernel]:
+    for kernel in [rbf_kernel, exponential_kernel, matern32_kernel, matern52_kernel, spectral_mixture_kernel, linear_kernel]:
       kernel_name = get_kernel_name(kernel)
       gpr_image = self.get_gpr_image(i, kernel_name)
       if gpr_image is not None:
@@ -104,3 +104,7 @@ class Evaluator:
         print(f'{key} - PSNR: {value.psnr/14:.3f}, SSIM: {value.ssim/14:.3f}')
     
     return self.metrics
+  
+if __name__ == '__main__':
+  evaluator = Evaluator(2, verbose=True)
+  evaluator.evaluate()

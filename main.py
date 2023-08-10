@@ -6,7 +6,7 @@ import numpy as np
 from sympy import Ge
 import torch
 from image_patches import PatchHandler, PatchInterpolationMode
-from kernels import GeneralModel, get_kernel_name, matern32_kernel, matern52_kernel
+from kernels import GeneralModel, get_kernel_name, matern32_kernel, matern52_kernel, linear_kernel
 
 torch.manual_seed(0)
 torch.set_default_tensor_type(torch.DoubleTensor)
@@ -20,17 +20,17 @@ class Dataset(Enum):
   Set14 = 0
   Set14Smaller = 1 # Created with create_smaller_data.py. Same images as Set14, but 4x smaller.
 
-SRF = 2 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
+SRF = 3 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
 DATASET = Dataset.Set14 # The dataset to be used for the algorithm
-IMAGE_NUMS = [0] # Image numbers to be used from the used dataset (1-14)
+IMAGE_NUMS = range(1,15) # Image numbers to be used from the used dataset (1-14)
 DO_TIMING = True # Whether to print the time it takes to upscale each image
 
 USED_COLOR_SPACE = ColorSpace.YUV # Color space to be used for the algorithm
-USED_KERNEL = matern52_kernel # supports all kernels from kernels.py
+USED_KERNEL = linear_kernel # supports all kernels from kernels.py
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
 STRIDE_PERCENTAGE = 0.9 # STRIDE / PATCH_SIZE. A little less than 1 to avoid edge effects.
-PATCH_INTERPOLATION = PatchInterpolationMode.BILINEAR # How to interpolate the results of overlapping patches
+PATCH_INTERPOLATION = PatchInterpolationMode.AVERAGE # How to interpolate the results of overlapping patches
 
 # Extracts a patch from the image, with the given indices as the top left corner.
 # Note that the patch is copied, so changing the patch does not change the image.
