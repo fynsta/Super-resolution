@@ -38,6 +38,6 @@ def get_kernel_name(kernel):
   elif isinstance(kernel, LinearKernel):
     return "linear"
   elif isinstance(kernel, AdditiveKernel) or isinstance(kernel, ProductKernel):
-    return "mixed_" + kernel.__hash__()
+    return "combination_" + str(kernel.__hash__())
   else:
     raise Exception(f"Unknown kernel type: {kernel}")

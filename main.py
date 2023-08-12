@@ -75,7 +75,7 @@ class GPRSR:
       img_out = cv.merge((b, g, r))
 
     if DO_TIMING:
-      print("Upscaling took %s seconds" % (time.time() - start_time))
+      print("Upscaling took %s seconds" % (time.time() - start_time), flush=True)
 
     return img_out
   

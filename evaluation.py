@@ -5,6 +5,7 @@ import cv2
 import os
 from skimage import metrics
 from kernels import get_kernel_name, rbf_kernel, exponential_kernel, matern32_kernel, matern52_kernel, spectral_mixture_kernel, linear_kernel
+from main import GPRSR, USED_COLOR_SPACE
 
 class PerceptualSimilarityMetric(Enum):
   PSNR = 1
@@ -38,10 +39,19 @@ class Evaluator:
   def get_bicubic_image(self, i):
     return self.get_image(i, 'bicubic')
   
-  def get_gpr_image(self, i, kernel_name):
-    return self.get_image(i, f'GPR_{kernel_name}', fail_on_nonexistent=False)
+  def get_gpr_image(self, i, kernel):
+    kernel_name = get_kernel_name(kernel)
+    image = self.get_image(i, f'GPR_{kernel_name}', fail_on_nonexistent=False)
+    if image is None:
+      lr_image = cv2.imread(f'Set14/image_SRF_{self.srf}/img_{i:03d}_SRF_{self.srf}_LR.png')
+      image = GPRSR(self.srf, kernel, USED_COLOR_SPACE).apply(lr_image)
+      cv2.imwrite(f'Set14/image_SRF_{self.srf}/img_{i:03d}_SRF_{self.srf}_GPR_{kernel_name}.png', image)
 
-  def get_image(self, i, method, fail_on_nonexistent=True):
+      # Read the image again to make sure it is in the correct format for the evaluator
+      image = self.get_image(i, f'GPR_{kernel_name}')
+    return image
+
+  def get_image(self, i, method, fail_on_nonexistent=True, grayscale=True):
     image_path = f'Set14/image_SRF_{self.srf}/img_{i:03d}_SRF_{self.srf}_{method}.png'
     if not(os.path.exists(image_path)):
       if fail_on_nonexistent:
@@ -69,7 +79,7 @@ class Evaluator:
 
     for kernel in [rbf_kernel, exponential_kernel, matern32_kernel, matern52_kernel, spectral_mixture_kernel, linear_kernel]:
       kernel_name = get_kernel_name(kernel)
-      gpr_image = self.get_gpr_image(i, kernel_name)
+      gpr_image = self.get_gpr_image(i, kernel)
       if gpr_image is not None:
         self.metrics[kernel_name] += self.get_metrics(hr_image, gpr_image, kernel_name)
 
@@ -82,12 +92,12 @@ class Evaluator:
     result = PerceptualSimilarity(0,0,0)
     for i in range(1, 15):
       hr_image = self.get_hr_image(i)
-      upsampled_image = self.get_gpr_image(i, kernel_name)
+      upsampled_image = self.get_gpr_image(i, kernel)
       result += self.get_metrics(hr_image, upsampled_image, kernel_name)
     
     result = result.average()
     if self.verbose:
-      print(f'{kernel_name} - PSNR: {result.psnr:.3f}, SSIM: {result.ssim:.3f}')
+      print(f'{kernel_name} - PSNR: {result.psnr:.3f}, SSIM: {result.ssim:.3f}', flush=True)
 
     if metric == PerceptualSimilarityMetric.PSNR:
       return result.psnr
@@ -107,4 +117,5 @@ class Evaluator:
   
 if __name__ == '__main__':
   evaluator = Evaluator(2, verbose=True)
-  evaluator.evaluate()
+  ssim = evaluator.evaluate_metric(rbf_kernel + rbf_kernel, PerceptualSimilarityMetric.SSIM)
+  print(ssim)
