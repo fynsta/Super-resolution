@@ -25,8 +25,9 @@ class PerceptualSimilarity(NamedTuple):
 
 
 class Evaluator:
-  def __init__(self, srf, verbose=False):
+  def __init__(self, srf, image_nums = range(1,15), verbose=False):
     self.srf = srf
+    self.image_nums = image_nums
     self.verbose = verbose
     self.metrics = defaultdict(lambda: PerceptualSimilarity(0,0,0))
 
@@ -83,14 +84,11 @@ class Evaluator:
       if gpr_image is not None:
         self.metrics[kernel_name] += self.get_metrics(hr_image, gpr_image, kernel_name)
 
-    if self.verbose:
-      print()
-
   def evaluate_metric(self, kernel, metric):
     kernel_name = get_kernel_name(kernel)
 
     result = PerceptualSimilarity(0,0,0)
-    for i in range(1, 15):
+    for i in self.image_nums:
       hr_image = self.get_hr_image(i)
       upsampled_image = self.get_gpr_image(i, kernel)
       result += self.get_metrics(hr_image, upsampled_image, kernel_name)
@@ -105,7 +103,7 @@ class Evaluator:
       return result.ssim
 
   def evaluate(self):
-    for i in range(1, 15):
+    for i in self.image_nums:
       self.evaluate_image(i)
 
     if self.verbose:

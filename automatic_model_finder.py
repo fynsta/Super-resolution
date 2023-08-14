@@ -2,6 +2,7 @@
 
 from main import SRF
 from evaluation import Evaluator, PerceptualSimilarityMetric
+import copy
 from kernels import GeneralModel, get_kernel_name, rbf_kernel, matern52_kernel, matern32_kernel, exponential_kernel, periodic_kernel, spectral_mixture_kernel, linear_kernel
 
 from gpytorch.kernels import AdditiveKernel
@@ -17,11 +18,11 @@ class AutomaticModelConstructor():
   # verbose: whether to print out the best kernel
   # interpretability_mode: whether to use interpretability mode (i.e. only multiply the kernel onto the last kernel in the sum)
   # num_iterations: number of iterations to run the algorithm
-  def __init__(self, base_kernels, verbose=False, interpretability_mode=True, num_iterations=5):
+  def __init__(self, base_kernels, image_nums = range(1,15), verbose=False, interpretability_mode=True, num_iterations=5):
     self.verbose = verbose
     self.interpretability_mode = interpretability_mode
 
-    self.evaluator = Evaluator(SRF)
+    self.evaluator = Evaluator(SRF, image_nums=image_nums)
 
     self.base_kernels = base_kernels
     self.num_iterations = num_iterations
@@ -54,7 +55,8 @@ class AutomaticModelConstructor():
 
     # Adding a kernel
     for k in self.base_kernels:
-      kernel = self.current_best_kernel + k
+      kernel = copy.deepcopy(self.current_best_kernel)
+      kernel = kernel + k
       ssim = self.get_ssim(kernel)
 
       if ssim > next_best_ssim:
@@ -63,8 +65,8 @@ class AutomaticModelConstructor():
 
     # Multiplying a kernel
     for k in self.base_kernels:
-      if self.interpretability_mode and self.current_best_kernel.__class__ == AdditiveKernel:
-        kernel = self.current_best_kernel
+      kernel = copy.deepcopy(self.current_best_kernel)
+      if self.interpretability_mode and kernel.__class__ == AdditiveKernel:
         kernel.kernels[-1] = kernel.kernels[-1] * k
       else:
         kernel = self.current_best_kernel * k
@@ -87,12 +89,19 @@ class AutomaticModelConstructor():
     return True
 
   def get_ssim(self, kernel):
-    ssim = self.evaluator.evaluate_metric(kernel, PerceptualSimilarityMetric.SSIM)
-    if self.verbose:
-      print(f'SSIM for {get_kernel_name(kernel)}: {ssim}', flush=True)
-    return ssim
+    try:
+      ssim = self.evaluator.evaluate_metric(kernel, PerceptualSimilarityMetric.SSIM)
+      if self.verbose:
+        print(f'SSIM for {get_kernel_name(kernel)}: {ssim}', flush=True)
+      return ssim
+    except:
+      return 0
 
 if __name__ == '__main__':
-  best_kernel = AutomaticModelConstructor([rbf_kernel, matern52_kernel, exponential_kernel, periodic_kernel, linear_kernel], verbose=True).run()
+  best_kernel = AutomaticModelConstructor(
+    [rbf_kernel, matern52_kernel, exponential_kernel, periodic_kernel, linear_kernel],
+    image_nums=[1],
+    verbose=True
+  ).run()
   print('Finally done!')
   print(f'Best kernel: {best_kernel}')

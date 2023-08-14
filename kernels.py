@@ -37,7 +37,11 @@ def get_kernel_name(kernel):
     return "spectral_mixture"
   elif isinstance(kernel, LinearKernel):
     return "linear"
-  elif isinstance(kernel, AdditiveKernel) or isinstance(kernel, ProductKernel):
-    return "combination_" + str(kernel.__hash__())
+  elif isinstance(kernel, AdditiveKernel):
+    subkernel_names = [get_kernel_name(k) for k in kernel.kernels]
+    return f"add({','.join(subkernel_names)})"
+  elif isinstance(kernel, ProductKernel):
+    subkernel_names = [get_kernel_name(k) for k in kernel.kernels]
+    return f"prod({','.join(subkernel_names)})"
   else:
     raise Exception(f"Unknown kernel type: {kernel}")
