@@ -40,6 +40,9 @@ class Evaluator:
   def get_bicubic_image(self, i):
     return self.get_image(i, 'bicubic')
   
+  def get_agpr_image(self, i):
+    return self.get_image(i, 'AGPR')
+  
   def get_gpr_image(self, i, kernel):
     kernel_name = get_kernel_name(kernel)
     image = self.get_image(i, f'GPR_{kernel_name}', fail_on_nonexistent=False)
@@ -77,6 +80,9 @@ class Evaluator:
     hr_image = self.get_hr_image(i)
     bicubic_image = self.get_bicubic_image(i)
     self.metrics['Bicubic (Baseline)'] += self.get_metrics(hr_image, bicubic_image, 'Bicubic (Baseline)')
+
+    agpr_image = self.get_agpr_image(i)
+    self.metrics['AGPR'] += self.get_metrics(hr_image, agpr_image, 'AGPR')
 
     for kernel in [rbf_kernel, exponential_kernel, matern32_kernel, matern52_kernel, spectral_mixture_kernel, linear_kernel]:
       kernel_name = get_kernel_name(kernel)
