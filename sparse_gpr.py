@@ -3,10 +3,11 @@ from math import floor
 import torch
 import cv2
 import numpy as np
-from kernels import GeneralModel, linear_kernel, matern52_kernel
-from skimage import metrics, transform
+from kernels import GeneralModel, linear_kernel
+from skimage import metrics
+import os
 
-M = 14 # Number of images to train on
+M = 13 # Number of images to train on
 N = 500 # Number of available patches to train on in the images
 R = 100 # Number of patches to actually train on (chosen by active sampling)
 K = 10 # Number of nearest neighbors to use for characteristic score
@@ -19,23 +20,62 @@ CHARACTERISTIC_TRADEOFF = 0.2
 TAU = 0.01 # Iterative back projection parameter
 
 class SparseGPRSuperResolution:
-  def __init__(self, super_resolution_factor) -> None:
+  def __init__(self, super_resolution_factor, use_existing_model = False) -> None:
     self.super_resolution_factor = super_resolution_factor
+    self.image_numbers = [i for i in range(1, M+1)]
 
-    self.train()
+    self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
 
-  def train(self) -> None:
-    lr_images = get_images(self.super_resolution_factor, "LR")
+    if not(os.path.exists(self.get_checkpoint_path("model"))):
+      use_existing_model = False
+
+    if use_existing_model:
+      self.train_x = torch.load(self.get_checkpoint_path("train_x"))
+      self.train_y = torch.load(self.get_checkpoint_path("train_y"))
+    else:
+      self.set_training_data()
+
+    if torch.cuda.is_available():
+      self.train_x = self.train_x.cuda()
+      self.train_y = self.train_y.cuda()
+      self.model = self.model.cuda()
+      self.likelihood = self.likelihood.cuda()
+
+    self.model = GeneralModel(linear_kernel, self.train_x, self.train_y, self.likelihood)
+
+    if use_existing_model:
+      self.model.load_state_dict(torch.load(self.get_checkpoint_path("model")))
+    else:
+      self.model.train()
+      self.likelihood.train()
+
+      optimizer = torch.optim.Adam(self.model.parameters(), lr=0.1)
+      mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.model)
+
+      for _ in range(50):
+        optimizer.zero_grad()
+        output = self.model(self.train_x)
+        loss = -mll(output, self.train_y)
+        loss.backward()
+        optimizer.step()
+
+      torch.save(self.model.state_dict(), self.get_checkpoint_path("model"))
+
+    self.model.eval()
+    self.likelihood.eval()
+
+  def set_training_data(self) -> None:
+    lr_images = self.get_images("LR")
     bicubic_images = [cv2.resize(
       lr_image, 
       (lr_image.shape[1] * self.super_resolution_factor, lr_image.shape[0] * self.super_resolution_factor), 
       interpolation=cv2.INTER_CUBIC
     ) for lr_image in lr_images]
-    hr_images = get_images(self.super_resolution_factor, "HR")
+    hr_images = self.get_images("HR")
 
     high_frequency_images = [hr_image - bicubic_image for hr_image, bicubic_image in zip(hr_images, bicubic_images)]
 
-    # Choose random patches
+    # Choose random patches as basis for the dataset
     self.original_dataset = []
     for _ in range(N):
       image_index = np.random.randint(0, M)
@@ -46,8 +86,6 @@ class SparseGPRSuperResolution:
       self.original_dataset.append(np.concatenate((hr_patch, [center_pixel])))
 
     self.original_dataset = np.unique(np.array(self.original_dataset), axis=0)
-
-    # Create a picture where chosen patches are surrounded by red border
   
     # Choose patches to train on using active sampling
     distances = [[(np.linalg.norm(datapoint - other_datapoint))**2 for other_datapoint in self.original_dataset if (datapoint != other_datapoint).any()] for datapoint in self.original_dataset]
@@ -65,31 +103,8 @@ class SparseGPRSuperResolution:
     self.train_x = torch.tensor(np.array([datapoint[:-1] for datapoint in self.dataset]))
     self.train_y = torch.tensor([datapoint[-1] for datapoint in self.dataset])
 
-    self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
-    self.model = GeneralModel(linear_kernel, self.train_x, self.train_y, self.likelihood)
-    self.model.parameters
-
-    if torch.cuda.is_available():
-      self.train_x = self.train_x.cuda()
-      self.train_y = self.train_y.cuda()
-      self.model = self.model.cuda()
-      self.likelihood = self.likelihood.cuda()
-
-    self.model.train()
-    self.likelihood.train()
-
-    optimizer = torch.optim.Adam(self.model.parameters(), lr=0.1)
-    mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.model)
-
-    for _ in range(50):
-      optimizer.zero_grad()
-      output = self.model(self.train_x)
-      loss = -mll(output, self.train_y)
-      loss.backward()
-      optimizer.step()
-
-    self.model.eval()
-    self.likelihood.eval()
+    torch.save(self.train_x, self.get_checkpoint_path("train_x"))
+    torch.save(self.train_y, self.get_checkpoint_path("train_y"))
 
   def upscale(self, image : np.ndarray) -> np.ndarray:
     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) / 255
@@ -114,30 +129,25 @@ class SparseGPRSuperResolution:
     predictions = predictions.numpy().reshape((upscaled_image.shape[0] - 2 * padding, upscaled_image.shape[1] - 2 * padding))
     interpolated_image[padding:-padding, padding:-padding] += predictions
     interpolated_image = np.clip(interpolated_image, 0, 1)
-    interpolated_image *= 255
 
-    back_projected_image = interpolated_image.copy()
-    #back_projected_image = self.iterative_back_projection(interpolated_image, image)
+    back_projected_image = self.iterative_back_projection(interpolated_image, image)
 
-    return back_projected_image
+    return back_projected_image * 255
   
-  def iterative_back_projection(self, interpolated_image : np.ndarray, original_image) -> np.ndarray:
-    max_iterations = 50
+  def iterative_back_projection(self, interpolated_image : np.ndarray, original_image : np.ndarray) -> np.ndarray:
+    max_iterations = 100
     back_projection_kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
 
-    hr_image = cv2.imread("Set14/image_SRF_2/img_000_SRF_2_HR.png")
-    hr_image_gray = cv2.cvtColor(hr_image, cv2.COLOR_BGR2GRAY)
-
-    print('Starting iterative back projection')
-
     current_image = interpolated_image.copy()
+    current_error = np.inf
 
     for _ in range(max_iterations):
       blurred = cv2.GaussianBlur(current_image, (3, 3), 0)
       downscaled = cv2.resize(blurred, (original_image.shape[1], original_image.shape[0]), interpolation=cv2.INTER_CUBIC)
       difference = original_image - downscaled
-      print('Error: ', np.linalg.norm(difference)**2)
-      print('SSIM: ', metrics.structural_similarity(hr_image_gray, current_image))
+      if current_error - 0.01 <= np.linalg.norm(difference)**2: break
+      current_error = np.linalg.norm(difference)**2
+
       upscaled_difference = cv2.resize(difference, (current_image.shape[1], current_image.shape[0]), interpolation=cv2.INTER_CUBIC)
       back_projection = cv2.filter2D(upscaled_difference, -1, back_projection_kernel)
       current_image += back_projection * TAU
@@ -163,34 +173,35 @@ class SparseGPRSuperResolution:
 
     return np.min(-np.exp(-selected_distances / (2*bandwidth)))
   
-def get_images(super_resolution_factor, resolution):
-  return [get_image(super_resolution_factor, resolution, i) for i in range(1, M+1)]
+  def get_images(self, resolution):
+    return [self.get_image(self.super_resolution_factor, resolution, i) for i in self.image_numbers]
 
-def get_image(super_resolution_factor, resolution, image_number):
-  image_path = f"Set14/image_SRF_{super_resolution_factor}/img_{image_number:03d}_SRF_{super_resolution_factor}_{resolution}.png"
-  image = cv2.imread(image_path)
-  image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) / 255
-  return image
+  def get_image(self, resolution, image_number):
+    image_path = f"Set14/image_SRF_{self.super_resolution_factor}/img_{image_number:03d}_SRF_{self.super_resolution_factor}_{resolution}.png"
+    image = cv2.imread(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) / 255
+    return image
   
+  def get_checkpoint_path(self, filename):
+    return f"checkpoints/SRF_{self.super_resolution_factor}/{'-'.join([str(image_number) for image_number in self.image_numbers])}/{filename}.pth"
+  
+
 if __name__ == "__main__":
   sparse_gpr = SparseGPRSuperResolution(2)
-  # original_image = get_image(2, "HR", 1)
-  # bicubic_interpolation = cv2.resize(original_image, (original_image.shape[1] // 2, original_image.shape[0] // 2), interpolation=cv2.INTER_CUBIC)
-  # cv2.imwrite("bicubic_interpolation.png", bicubic_interpolation * 255)
-  # result = sparse_gpr.iterative_back_projection(bicubic_interpolation, original_image)
-  # cv2.imwrite("result.png", result * 255)
 
-  interpolation = sparse_gpr.upscale(cv2.imread("Set14/image_SRF_2/img_000_SRF_2_LR.png"))
-  cv2.imwrite("interpolation.png", interpolation)
+  ## Evaluation code (hacked together)
+  image_num = 14
+  spgpr_interpolation = sparse_gpr.upscale(cv2.imread(f"Set14/image_SRF_2/img_{image_num:03d}_SRF_2_LR.png"))
+  cv2.imwrite(f"Set14/image_SRF_2/img_{image_num:03d}_SRF_2_SPGPR.png", spgpr_interpolation)
 
-  # Compare SSIM with bicubic interpolation
-  hr_image = cv2.imread("Set14/image_SRF_2/img_000_SRF_2_HR.png")
+  # Compare SSIM with bicubic interpolation & GPR
+  hr_image = cv2.imread(f"Set14/image_SRF_2/img_{image_num:03d}_SRF_2_HR.png")
   hr_image_gray = cv2.cvtColor(hr_image, cv2.COLOR_BGR2GRAY)
-  lr_image = cv2.imread("Set14/image_SRF_2/img_000_SRF_2_LR.png")
+  lr_image = cv2.imread(f"Set14/image_SRF_2/img_{image_num:03d}_SRF_2_LR.png")
   lr_image_gray = cv2.cvtColor(lr_image, cv2.COLOR_BGR2GRAY)
+  gpr_image = cv2.imread(f"Set14/image_SRF_2/img_{image_num:03d}_SRF_2_GPR_matern52_gray.png", cv2.IMREAD_GRAYSCALE)
+  spgpr_image = cv2.imread(f"Set14/image_SRF_2/img_{image_num:03d}_SRF_2_SPGPR.png", cv2.IMREAD_GRAYSCALE)
   bicubic_interpolation = cv2.resize(lr_image_gray, (hr_image.shape[1], hr_image.shape[0]), interpolation=cv2.INTER_CUBIC)
   print("SSIM bicubic interpolation:", metrics.structural_similarity(hr_image_gray, bicubic_interpolation))
-
-  spgpr_interpolation = cv2.imread("interpolation.png")
-  spgpr_interpolation_gray = cv2.cvtColor(spgpr_interpolation, cv2.COLOR_BGR2GRAY)
-  print("SSIM spgpr interpolation:", metrics.structural_similarity(hr_image_gray, spgpr_interpolation_gray))
+  print("SSIM standard gpr interpolation:", metrics.structural_similarity(hr_image_gray, gpr_image))
+  print("SSIM spgpr interpolation:", metrics.structural_similarity(hr_image_gray, spgpr_image))

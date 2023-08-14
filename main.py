@@ -20,13 +20,13 @@ class Dataset(Enum):
   Set14 = 0
   Set14Smaller = 1 # Created with create_smaller_data.py. Same images as Set14, but 4x smaller.
 
-SRF = 3 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
+SRF = 2 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
 DATASET = Dataset.Set14 # The dataset to be used for the algorithm
 IMAGE_NUMS = range(1,15) # Image numbers to be used from the used dataset (1-14)
 DO_TIMING = True # Whether to print the time it takes to upscale each image
 
-USED_COLOR_SPACE = ColorSpace.YUV # Color space to be used for the algorithm
-USED_KERNEL = linear_kernel # supports all kernels from kernels.py
+USED_COLOR_SPACE = ColorSpace.GRAYSCALE # Color space to be used for the algorithm
+USED_KERNEL = matern52_kernel # supports all kernels from kernels.py
 USE_ALL_PIXELS_FOR_TRAINING = True # When False, only samples pixels in a grid pattern
 LEARNING_RATE = 0.1 # Learning rate for the hyperparameter training
 STRIDE_PERCENTAGE = 0.9 # STRIDE / PATCH_SIZE. A little less than 1 to avoid edge effects.
@@ -58,7 +58,8 @@ class GPRSR:
 
     if self.color_mode == ColorSpace.GRAYSCALE:
       img_in_gray = cv.cvtColor(lr_image, cv.COLOR_BGR2GRAY)
-      img_out = self.apply_for_channel(img_in_gray)
+      img_out_gray = self.apply_for_channel(img_in_gray)
+      img_out = cv.cvtColor(img_out_gray, cv.COLOR_GRAY2BGR)
     elif self.color_mode == ColorSpace.YUV:
       img_in_yuv = cv.cvtColor(lr_image, cv.COLOR_BGR2YUV)
       y, u, v = cv.split(img_in_yuv)
@@ -226,7 +227,7 @@ if __name__ == '__main__':
   for i in IMAGE_NUMS:
     if DATASET == Dataset.Set14:
       lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
-      gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{kernel_name}.png'
+      gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{kernel_name}{"_gray" if USED_COLOR_SPACE == ColorSpace.GRAYSCALE else ""}.png'
     elif DATASET == Dataset.Set14Smaller:
       lrImagePath = f'Set14_smaller/{i:03d}_LR.png'
       gprImagePath = f'Set14_smaller/{i:03d}_GPR_{kernel_name}_{SRF}x.png'
