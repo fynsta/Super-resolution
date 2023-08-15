@@ -1,0 +1,9 @@
+Averages
+Bicubic (Baseline) - PSNR: 28.996, SSIM: 0.871
+AGPR - PSNR: 29.662, SSIM: 0.895
+RBF - PSNR: 28.636, SSIM: 0.868
+matern12 - PSNR: 28.683, SSIM: 0.866
+matern32 - PSNR: 29.255, SSIM: 0.881
+matern52 - PSNR: 28.896, SSIM: 0.879
+spectral_mixture - PSNR: 28.588, SSIM: 0.877
+linear - PSNR: 28.719, SSIM: 0.870

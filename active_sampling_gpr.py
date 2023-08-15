@@ -12,8 +12,8 @@ from kernels import GeneralModel, linear_kernel
 
 SRF = 2
 
-N = 500 # Number of available patches to train on in the images
-R = 100 # Number of patches to actually train on (chosen by active sampling)
+N = 1000 # Number of available patches to train on in the images
+R = 500 # Number of patches to actually train on (chosen by active sampling)
 K = 10 # Number of nearest neighbors to use for characteristic score
 L = 7 # Size of the patches
 assert L % 2 == 1, "L must be odd"
@@ -23,7 +23,7 @@ class TrainingDataset(Enum):
   Set14 = 1
   BSD100 = 2
 
-DATASET = TrainingDataset.Set14
+DATASET = TrainingDataset.BSD100
 
 SCALE_COEFFICIENT_BANDWIDTH = 1
 CHARACTERISTIC_TRADEOFF = 0.2
@@ -35,7 +35,7 @@ class AGPRSuperResolution:
 
     self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
 
-    if not(os.path.exists(self.get_checkpoint_folder())):
+    if not(os.path.exists(self.get_checkpoint_path('model'))):
       use_existing_model = False
 
     if use_existing_model:
@@ -44,13 +44,13 @@ class AGPRSuperResolution:
     else:
       self.set_training_data()
 
+    self.model = GeneralModel(linear_kernel, self.train_x, self.train_y, self.likelihood)
+
     if torch.cuda.is_available():
       self.train_x = self.train_x.cuda()
       self.train_y = self.train_y.cuda()
       self.model = self.model.cuda()
       self.likelihood = self.likelihood.cuda()
-
-    self.model = GeneralModel(linear_kernel, self.train_x, self.train_y, self.likelihood)
 
     if use_existing_model:
       self.model.load_state_dict(torch.load(self.get_checkpoint_path("model")))
@@ -80,7 +80,10 @@ class AGPRSuperResolution:
       (lr_image.shape[1] * self.super_resolution_factor, lr_image.shape[0] * self.super_resolution_factor), 
       interpolation=cv.INTER_CUBIC
     ) for lr_image in lr_images]
+
     hr_images = self.get_images("HR")
+    hr_images = [hr_image[:-1, :] if hr_image.shape[0] % 2 == 1 else hr_image for hr_image in hr_images]
+    hr_images = [hr_image[:, :-1] if hr_image.shape[1] % 2 == 1 else hr_image for hr_image in hr_images]
 
     high_frequency_images = [hr_image - bicubic_image for hr_image, bicubic_image in zip(hr_images, bicubic_images)]
 
@@ -198,15 +201,15 @@ class AGPRSuperResolution:
     return f"checkpoints/{DATASET.name}/SRF_{self.super_resolution_factor}/"
 
 if __name__ == "__main__":
-  sparse_gpr = AGPRSuperResolution(SRF, use_existing_model=True)
+  sparse_gpr = AGPRSuperResolution(SRF, use_existing_model=False)
 
-  for i in range(2,3):
+  for i in range(1,15):
     lr_image = cv.imread(f"Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png")
     interpolated_image = sparse_gpr.upscale(lr_image)
     cv.imwrite(f"Set14/image_SRF_{SRF}/img_{i:03d}_SRF_2_AGPR.png", interpolated_image)
 
-  evaluation = Evaluator(SRF, range(1,15), verbose=True)
-  evaluation.evaluate(PerceptualSimilarityMetric.SSIM)
+  evaluation = Evaluator(SRF, image_nums=range(1,15))
+  metrics = evaluation.evaluate()
 
   ## Evaluation code (hacked together)
   # image_num = 1

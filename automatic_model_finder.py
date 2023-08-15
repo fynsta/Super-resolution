@@ -90,7 +90,7 @@ class AutomaticModelConstructor():
 
   def get_ssim(self, kernel):
     try:
-      ssim = self.evaluator.evaluate_metric(kernel, PerceptualSimilarityMetric.SSIM)
+      ssim = self.evaluator.evaluate_method(kernel, PerceptualSimilarityMetric.SSIM)
       if self.verbose:
         print(f'SSIM for {get_kernel_name(kernel)}: {ssim}', flush=True)
       return ssim
