@@ -7,7 +7,7 @@ from gpytorch.kernels import Kernel
 from skimage import metrics
 from sklearn import preprocessing
 from kernels import get_kernel_name, rbf_kernel, exponential_kernel, matern32_kernel, matern52_kernel, spectral_mixture_kernel, linear_kernel
-from main import GPRSR, USED_COLOR_SPACE
+from gprsr import GPRSR, USED_COLOR_SPACE
 
 class PerceptualSimilarityMetric(Enum):
   PSNR = 1

@@ -1,6 +1,6 @@
 
 
-from main import SRF
+from gprsr import SRF
 from evaluation import Evaluator, PerceptualSimilarityMetric
 import copy
 from kernels import GeneralModel, get_kernel_name, rbf_kernel, matern52_kernel, matern32_kernel, exponential_kernel, periodic_kernel, spectral_mixture_kernel, linear_kernel

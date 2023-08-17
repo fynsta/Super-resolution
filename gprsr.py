@@ -35,7 +35,7 @@ def extract_neighbors(img, y, x):
   return [img[y_val, x_val] for y_val, x_val in [(y+1, x), (y-1, x), (y, x+1), (y, x-1), (y+1, x+1), (y-1, x-1), (y+1, x-1), (y-1, x+1)]]
 
 class GPRSR:
-  def __init__(self, scaling_factor, used_kernel, color_mode):
+  def __init__(self, scaling_factor, used_kernel = matern52_kernel, color_mode = ColorSpace.YUV):
     self.scaling_factor = scaling_factor
     self.current_scaling_factor = None # Used to keep track of the current scaling factor in the algorithm
     self.used_kernel = used_kernel
