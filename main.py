@@ -3,7 +3,6 @@ import time
 import cv2 as cv
 import gpytorch
 import numpy as np
-from sympy import Ge
 import torch
 from image_patches import PatchHandler, PatchInterpolationMode
 from kernels import GeneralModel, get_kernel_name, matern32_kernel, matern52_kernel, linear_kernel
@@ -16,12 +15,7 @@ class ColorSpace(Enum):
   YUV = 1
   GRAYSCALE = 2
 
-class Dataset(Enum):
-  Set14 = 0
-  Set14Smaller = 1 # Created with create_smaller_data.py. Same images as Set14, but 4x smaller.
-
 SRF = 2 # Scaling factor for the overall image (the datasets include images for 2x, 3x and 4x scaling)
-DATASET = Dataset.Set14 # The dataset to be used for the algorithm
 IMAGE_NUMS = range(1,15) # Image numbers to be used from the used dataset (1-14)
 DO_TIMING = True # Whether to print the time it takes to upscale each image
 
@@ -225,12 +219,8 @@ if __name__ == '__main__':
   gprsr = GPRSR(SRF, USED_KERNEL, USED_COLOR_SPACE)
   kernel_name = get_kernel_name(USED_KERNEL)
   for i in IMAGE_NUMS:
-    if DATASET == Dataset.Set14:
-      lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
-      gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{kernel_name}{"_gray" if USED_COLOR_SPACE == ColorSpace.GRAYSCALE else ""}.png'
-    elif DATASET == Dataset.Set14Smaller:
-      lrImagePath = f'Set14_smaller/{i:03d}_LR.png'
-      gprImagePath = f'Set14_smaller/{i:03d}_GPR_{kernel_name}_{SRF}x.png'
+    lrImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png'
+    gprImagePath = f'Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_GPR_{kernel_name}{"_gray" if USED_COLOR_SPACE == ColorSpace.GRAYSCALE else ""}.png'
 
     lrImg = cv.imread(lrImagePath)
     gprImg = gprsr.apply(lrImg)
