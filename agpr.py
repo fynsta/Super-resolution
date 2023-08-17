@@ -111,8 +111,8 @@ class AGPRSuperResolution:
       hr_image, bicubic_image = hr_images[image_index], bicubic_images[image_index]
       x, y = np.random.randint(padding, hr_image.shape[1] - padding), np.random.randint(padding, hr_image.shape[0] - padding)
       bicubic_patch = bicubic_image[y-padding:y+padding+1, x-padding:x+padding+1].reshape(-1)
-      center_pixel = hr_image[y, x] - bicubic_image[y, x]
-      data = np.concatenate((bicubic_patch, [center_pixel]))
+      #center_pixel = hr_image[y, x] - bicubic_image[y, x]
+      data = np.concatenate((bicubic_patch, [hr_image[y, x]]))
       self.original_dataset.append(data)
 
     self.original_dataset = np.unique(np.array(self.original_dataset), axis=0)
@@ -182,7 +182,7 @@ class AGPRSuperResolution:
 
 
     predictions = predictions.reshape((upscaled_image.shape[0] - 2*padding, upscaled_image.shape[1] - 2*padding))
-    upscaled_image[padding:-padding, padding:-padding] += predictions
+    upscaled_image[padding:-padding, padding:-padding] = predictions
 
     upscaled_image = self.iterative_back_projection(upscaled_image, image)
     upscaled_image = np.clip(upscaled_image, 0, 1)
@@ -246,7 +246,7 @@ def downscale(image : np.ndarray) -> np.ndarray:
   return cv.resize(image, (image.shape[1] // SRF, image.shape[0] // SRF), interpolation=cv.INTER_CUBIC)
 
 if __name__ == "__main__":
-  agpr = AGPRSuperResolution(SRF, use_existing_model=True, verbose=True)
+  agpr = AGPRSuperResolution(SRF, use_existing_model=False, verbose=True)
   evaluation = Evaluator(SRF, image_nums=range(1,15), generate_gpr_images=False, verbose=True)
 
   # dataset = load_dataset('eugenesiow/Set5', split='validation')['hr']
@@ -286,8 +286,9 @@ if __name__ == "__main__":
     hr_image = cv.imread(f"Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_HR.png")
     lr_image = downscale(hr_image)
     interpolated_image = agpr.upscale(lr_image)
-    cv.imwrite(f"Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_AGPR.png", interpolated_image)
+    cv.imwrite(f"Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_AGPR2.png", interpolated_image)
 
   evaluation = Evaluator(SRF, image_nums=range(1,15), generate_gpr_images=False, verbose=True)
   evaluation.evaluate_method("AGPR")
+  evaluation.evaluate_method("AGPR2")
   evaluation.evaluate_method("bicubic")
