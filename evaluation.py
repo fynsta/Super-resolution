@@ -5,6 +5,7 @@ import cv2
 import os
 from gpytorch.kernels import Kernel
 from skimage import metrics
+from sklearn import preprocessing
 from kernels import get_kernel_name, rbf_kernel, exponential_kernel, matern32_kernel, matern52_kernel, spectral_mixture_kernel, linear_kernel
 from main import GPRSR, USED_COLOR_SPACE
 
@@ -54,9 +55,6 @@ class Evaluator:
       lr_image = cv2.imread(f'Set14/image_SRF_{self.srf}/img_{i:03d}_SRF_{self.srf}_LR.png')
       image = GPRSR(self.srf, kernel, USED_COLOR_SPACE).apply(lr_image)
       cv2.imwrite(f'Set14/image_SRF_{self.srf}/img_{i:03d}_SRF_{self.srf}_GPR_{kernel_name}.png', image)
-
-      # Read the image again to make sure it is in the correct format for the evaluator
-      image = self.get_image(i, f'GPR_{kernel_name}')
     return image
 
   def get_image(self, i, method, fail_on_nonexistent=False):
@@ -67,17 +65,37 @@ class Evaluator:
       else:
         return None
 
-    image = cv2.imread(image_path)
-    return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)[self.srf:-self.srf, self.srf:-self.srf]
+    return cv2.imread(image_path)
   
   def get_metrics(self, hr_image, upsampled_image, name):
     if upsampled_image is None:
       return PerceptualSimilarity(0,0,0)
-    psnr = metrics.peak_signal_noise_ratio(hr_image, upsampled_image)
-    ssim = metrics.structural_similarity(hr_image, upsampled_image)
+    
+    preprocessed_hr_image = self.preprocess_image(hr_image)
+    preprocessed_upsampled_image = self.preprocess_image(upsampled_image)
+
+    psnr = self.get_psnr(preprocessed_hr_image, preprocessed_upsampled_image)
+    ssim = self.get_ssim(preprocessed_hr_image, preprocessed_upsampled_image)
     if self.verbose:
       print(f'{name} - PSNR: {psnr:.3f}, SSIM: {ssim:.3f}')
     return PerceptualSimilarity(psnr, ssim)
+  
+  def get_psnr(self, hr_image, upsampled_image, preprocess=False):
+    if preprocess:
+      hr_image = self.preprocess_image(hr_image)
+      upsampled_image = self.preprocess_image(upsampled_image)
+    return metrics.peak_signal_noise_ratio(hr_image, upsampled_image, data_range=255)
+  
+  def get_ssim(self, hr_image, upsampled_image, preprocess=False):
+    if preprocess:
+      hr_image = self.preprocess_image(hr_image)
+      upsampled_image = self.preprocess_image(upsampled_image)
+    return metrics.structural_similarity(hr_image, upsampled_image, data_range=255)
+  
+  def preprocess_image(self, image):
+    if len(image.shape) == 3:
+      image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    return image[self.srf:-self.srf, self.srf:-self.srf]
   
   def evaluate_image(self, i):
     if self.verbose:

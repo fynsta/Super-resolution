@@ -14,9 +14,9 @@ from kernels import GeneralModel, linear_kernel
 torch.manual_seed(0)
 torch.set_default_tensor_type(torch.FloatTensor)
 
-SRF = 3
+SRF = 2
 
-N = 10000 # Number of available patches to train on in the images
+N = 5000 # Number of available patches to train on in the images
 ACTIVE_SAMPLING_RATIO = 0.1 # Ratio of patches to actually train on
 K = 10 # Number of nearest neighbors to use for characteristic score
 L = 7 # Size of the patches
@@ -28,11 +28,11 @@ class TrainingDataset(Enum):
   BSD100 = 2
 
 class ColorSpace(Enum):
-  YUV = 1
+  YCRCB = 1
   GRAYSCALE = 2
 
 DATASET = TrainingDataset.BSD100
-COLOR_SPACE = ColorSpace.GRAYSCALE
+COLOR_SPACE = ColorSpace.YCRCB
 
 SCALE_COEFFICIENT_BANDWIDTH = 0.2
 CHARACTERISTIC_TRADEOFF = 0.2
@@ -146,12 +146,12 @@ class AGPRSuperResolution:
     if self.verbose: print("Training data set in {:.2f} seconds".format(time() - training_data_time))
 
   def upscale(self, image : np.ndarray) -> np.ndarray:
-    if COLOR_SPACE == ColorSpace.YUV:
-      y, u, v = cv.split(cv.cvtColor(image, cv.COLOR_BGR2YUV))
+    if COLOR_SPACE == ColorSpace.YCRCB:
+      y, cr, cb = cv.split(cv.cvtColor(image, cv.COLOR_BGR2YCrCb))
       y = self.upscale_channel(y).astype(np.uint8)
-      u = cv.resize(u, (y.shape[1], y.shape[0]), interpolation=cv.INTER_CUBIC)
-      v = cv.resize(v, (y.shape[1], y.shape[0]), interpolation=cv.INTER_CUBIC)
-      return cv.cvtColor(cv.merge((y, u, v)), cv.COLOR_YUV2BGR)
+      cr = cv.resize(cr, (y.shape[1], y.shape[0]), interpolation=cv.INTER_CUBIC)
+      cb = cv.resize(cb, (y.shape[1], y.shape[0]), interpolation=cv.INTER_CUBIC)
+      return cv.cvtColor(cv.merge((y, cr, cb)), cv.COLOR_YCrCb2BGR)
     elif COLOR_SPACE == ColorSpace.GRAYSCALE:
       gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
       gray = self.upscale_channel(gray)
@@ -229,8 +229,8 @@ class AGPRSuperResolution:
 
     images = [cv.imread(image_path) for image_path in image_paths]
 
-    if COLOR_SPACE == ColorSpace.YUV:
-      images = [cv.cvtColor(image, cv.COLOR_BGR2YUV)[:,:,0] / 255 for image in images]
+    if COLOR_SPACE == ColorSpace.YCRCB:
+      images = [cv.cvtColor(image, cv.COLOR_BGR2YCrCb)[:,:,0] / 255 for image in images]
     elif COLOR_SPACE == ColorSpace.GRAYSCALE:
       images = [cv.cvtColor(image, cv.COLOR_BGR2GRAY) / 255 for image in images]
     return images
@@ -246,13 +246,46 @@ def downscale(image : np.ndarray) -> np.ndarray:
   return cv.resize(image, (image.shape[1] // SRF, image.shape[0] // SRF), interpolation=cv.INTER_CUBIC)
 
 if __name__ == "__main__":
-  sparse_gpr = AGPRSuperResolution(SRF, use_existing_model=False, verbose=True)
+  agpr = AGPRSuperResolution(SRF, use_existing_model=True, verbose=True)
+  evaluation = Evaluator(SRF, image_nums=range(1,15), generate_gpr_images=False, verbose=True)
+
+  # dataset = load_dataset('eugenesiow/Set5', split='validation')['hr']
+  # ssim_ssum_agpr = 0
+  # psnr_ssum_agpr = 0
+  # ssim_ssum_bicubic = 0
+  # psnr_ssum_bicubic = 0
+  # for i, hr_image in enumerate(dataset):
+  #   hr_image = cv.imread(dataset[i])
+  #   hr_image = hr_image if hr_image.shape[0] % SRF == 0 else hr_image[:-(hr_image.shape[0] % SRF)]
+  #   hr_image = hr_image if hr_image.shape[1] % SRF == 0 else hr_image[:,:-(hr_image.shape[1] % SRF)]
+
+  #   lr_image = downscale(hr_image)
+  #   interpolated_image = agpr.upscale(lr_image)
+  #   cv.imwrite(f"Set5/image_SRF_{SRF}/img_{i}_SRF_{SRF}_AGPR.png", interpolated_image)
+  #   ssim = evaluation.get_ssim(hr_image, interpolated_image, preprocess=True)
+  #   psnr = evaluation.get_psnr(hr_image, interpolated_image, preprocess=True)
+  #   ssim_ssum_agpr += ssim
+  #   psnr_ssum_agpr += psnr
+  #   print(f"Image {i}: SSIM = {ssim:.4f}, PSNR = {psnr:.4f}")
+  #   bicubic_image = cv.resize(lr_image, (lr_image.shape[1] * SRF, lr_image.shape[0] * SRF), interpolation=cv.INTER_CUBIC)
+  #   cv.imwrite(f"Set5/image_SRF_{SRF}/img_{i}_SRF_{SRF}_bicubic.png", bicubic_image)
+  #   ssim = evaluation.get_ssim(hr_image, bicubic_image, preprocess=True)
+  #   psnr = evaluation.get_psnr(hr_image, bicubic_image, preprocess=True)
+  #   ssim_ssum_bicubic += ssim
+  #   psnr_ssum_bicubic += psnr
+  #   print(f"Image {i}: SSIM = {ssim:.4f}, PSNR = {psnr:.4f}")
+
+  # print(f"Average SSIM AGPR: {ssim_ssum_agpr / len(dataset):.4f}")
+  # print(f"Average PSNR AGPR: {psnr_ssum_agpr / len(dataset):.4f}")
+  # print(f"Average SSIM bicubic: {ssim_ssum_bicubic / len(dataset):.4f}")
+  # print(f"Average PSNR bicubic: {psnr_ssum_bicubic / len(dataset):.4f}")
+
 
   for i in range(1,15):
     start_time = time()
     hr_image = cv.imread(f"Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_HR.png")
     lr_image = downscale(hr_image)
-    interpolated_image = sparse_gpr.upscale(lr_image)
+    interpolated_image = agpr.upscale(lr_image)
     cv.imwrite(f"Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_AGPR.png", interpolated_image)
 
   evaluation = Evaluator(SRF, image_nums=range(1,15), generate_gpr_images=False, verbose=True)

@@ -1,6 +1,57 @@
 Averages
 Bicubic (Baseline) - PSNR: 28.996, SSIM: 0.871
-AGPR - PSNR: 29.662, SSIM: 0.895
+AGPR - PSNR: 29.672, SSIM: 0.894
+RBF - PSNR: 28.636, SSIM: 0.868
+matern12 - PSNR: 28.683, SSIM: 0.866
+matern32 - PSNR: 29.255, SSIM: 0.881
+matern52 - PSNR: 28.896, SSIM: 0.879
+spectral_mixture - PSNR: 28.588, SSIM: 0.877
+linear - PSNR: 28.719, SSIM: 0.870
+Selected 0 patches
+Selected 10 patches
+Selected 20 patches
+Selected 30 patches
+Selected 40 patches
+Upscaled image 1
+Upscaled image 2
+Upscaled image 3
+Upscaled image 4
+Upscaled image 5
+Upscaled image 6
+Upscaled image 7
+Upscaled image 8
+Upscaled image 9
+Upscaled image 10
+Upscaled image 11
+Upscaled image 12
+Upscaled image 13
+Upscaled image 14
+Averages
+Bicubic (Baseline) - PSNR: 28.996, SSIM: 0.871
+AGPR - PSNR: 23.884, SSIM: 0.848
+RBF - PSNR: 28.636, SSIM: 0.868
+matern12 - PSNR: 28.683, SSIM: 0.866
+matern32 - PSNR: 29.255, SSIM: 0.881
+matern52 - PSNR: 28.896, SSIM: 0.879
+spectral_mixture - PSNR: 28.588, SSIM: 0.877
+linear - PSNR: 28.719, SSIM: 0.870
+Upscaled image 1
+Upscaled image 2
+Upscaled image 3
+Upscaled image 4
+Upscaled image 5
+Upscaled image 6
+Upscaled image 7
+Upscaled image 8
+Upscaled image 9
+Upscaled image 10
+Upscaled image 11
+Upscaled image 12
+Upscaled image 13
+Upscaled image 14
+Averages
+Bicubic (Baseline) - PSNR: 28.996, SSIM: 0.871
+AGPR - PSNR: 24.569, SSIM: 0.852
 RBF - PSNR: 28.636, SSIM: 0.868
 matern12 - PSNR: 28.683, SSIM: 0.866
 matern32 - PSNR: 29.255, SSIM: 0.881
