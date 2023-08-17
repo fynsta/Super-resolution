@@ -22,15 +22,18 @@ class PerceptualSimilarity(NamedTuple):
     return PerceptualSimilarity(self.psnr + other.psnr, self.ssim + other.ssim, self.number_of_images + other.number_of_images)
   
   def average(self):
+    if self.number_of_images == 0:
+      return PerceptualSimilarity(0,0,0)
     return PerceptualSimilarity(self.psnr / self.number_of_images, self.ssim / self.number_of_images, 1)
 
 
 class Evaluator:
-  def __init__(self, srf, image_nums = range(1,15), verbose=False):
+  def __init__(self, srf, image_nums = range(1,15), verbose=False, generate_gpr_images=False):
     self.srf = srf
     self.image_nums = image_nums
     self.verbose = verbose
     self.metrics = defaultdict(lambda: PerceptualSimilarity(0,0,0))
+    self.generate_gpr_images = generate_gpr_images
 
   def clear(self):
     self.metrics = defaultdict(lambda: PerceptualSimilarity(0,0,0))
@@ -47,7 +50,7 @@ class Evaluator:
   def get_gpr_image(self, i, kernel):
     kernel_name = get_kernel_name(kernel)
     image = self.get_image(i, f'GPR_{kernel_name}')
-    if image is None:
+    if image is None and self.generate_gpr_images:
       lr_image = cv2.imread(f'Set14/image_SRF_{self.srf}/img_{i:03d}_SRF_{self.srf}_LR.png')
       image = GPRSR(self.srf, kernel, USED_COLOR_SPACE).apply(lr_image)
       cv2.imwrite(f'Set14/image_SRF_{self.srf}/img_{i:03d}_SRF_{self.srf}_GPR_{kernel_name}.png', image)
@@ -93,8 +96,11 @@ class Evaluator:
       if gpr_image is not None:
         self.metrics[kernel_name] += self.get_metrics(hr_image, gpr_image, kernel_name)
 
-  def evaluate_method(self, method, metric):
+  def evaluate_method(self, method, metric = PerceptualSimilarityMetric.ALL):
     kernel_name = get_kernel_name(method) if isinstance(method, Kernel) else method
+
+    if self.verbose:
+      print(f'Method {kernel_name}')
 
     result = PerceptualSimilarity(0,0,0)
     for i in self.image_nums:
@@ -104,7 +110,7 @@ class Evaluator:
     
     result = result.average()
     if self.verbose:
-      print(f'{kernel_name} - PSNR: {result.psnr:.3f}, SSIM: {result.ssim:.3f}', flush=True)
+      print(f'Average - PSNR: {result.psnr:.3f}, SSIM: {result.ssim:.3f}', flush=True)
 
     if metric == PerceptualSimilarityMetric.PSNR:
       return result.psnr
@@ -126,5 +132,4 @@ class Evaluator:
 
 if __name__ == '__main__':
   evaluator = Evaluator(2, verbose=True)
-  ssim = evaluator.evaluate()['AGPR'].ssim
-  print(ssim)
+  evaluator.evaluate_method('AGPR', PerceptualSimilarityMetric.ALL)

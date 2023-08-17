@@ -5,15 +5,19 @@ import cv2 as cv
 import numpy as np
 import os
 from enum import Enum
+from time import time
 from datasets import load_dataset
 
-from evaluation import Evaluator, PerceptualSimilarityMetric
+from evaluation import Evaluator
 from kernels import GeneralModel, linear_kernel
 
-SRF = 2
+torch.manual_seed(0)
+torch.set_default_tensor_type(torch.FloatTensor)
 
-N = 1000 # Number of available patches to train on in the images
-R = 500 # Number of patches to actually train on (chosen by active sampling)
+SRF = 3
+
+N = 10000 # Number of available patches to train on in the images
+ACTIVE_SAMPLING_RATIO = 0.1 # Ratio of patches to actually train on
 K = 10 # Number of nearest neighbors to use for characteristic score
 L = 7 # Size of the patches
 assert L % 2 == 1, "L must be odd"
@@ -23,15 +27,22 @@ class TrainingDataset(Enum):
   Set14 = 1
   BSD100 = 2
 
-DATASET = TrainingDataset.BSD100
+class ColorSpace(Enum):
+  YUV = 1
+  GRAYSCALE = 2
 
-SCALE_COEFFICIENT_BANDWIDTH = 1
+DATASET = TrainingDataset.BSD100
+COLOR_SPACE = ColorSpace.GRAYSCALE
+
+SCALE_COEFFICIENT_BANDWIDTH = 0.2
 CHARACTERISTIC_TRADEOFF = 0.2
 TAU = 0.01 # Iterative back projection parameter
 
 class AGPRSuperResolution:
-  def __init__(self, super_resolution_factor, use_existing_model = False) -> None:
-    self.super_resolution_factor = super_resolution_factor
+  def __init__(self, srf, use_existing_model = False, verbose = False) -> None:
+    self.srf = srf
+    self.verbose = verbose
+    self.start_time = time()
 
     self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
 
@@ -58,10 +69,13 @@ class AGPRSuperResolution:
       self.model.train()
       self.likelihood.train()
 
+      if self.verbose: print("Training model...", flush=True)
+      training_start_time = time()
+
       optimizer = torch.optim.Adam(self.model.parameters(), lr=0.1)
       mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.model)
 
-      for _ in range(50):
+      for _ in range(100):
         optimizer.zero_grad()
         output = self.model(self.train_x)
         loss = -mll(output, self.train_y)
@@ -70,46 +84,57 @@ class AGPRSuperResolution:
 
       torch.save(self.model.state_dict(), self.get_checkpoint_path("model"))
 
+      if self.verbose: print("Model trained in {:.2f} seconds".format(time() - training_start_time))
+
     self.model.eval()
     self.likelihood.eval()
 
   def set_training_data(self) -> None:
-    lr_images = self.get_images("LR")
+    training_data_time = time()
+
+    hr_images = self.get_training_images("HR")
+    hr_images = [hr_image if hr_image.shape[0] % self.srf == 0 else hr_image[:-(hr_image.shape[0] % self.srf)] for hr_image in hr_images]
+    hr_images = [hr_image if hr_image.shape[1] % self.srf == 0 else hr_image[:,:-(hr_image.shape[1] % self.srf)] for hr_image in hr_images]
+
+    lr_images = [downscale(hr_image) for hr_image in hr_images]
+
     bicubic_images = [cv.resize(
-      lr_image, 
-      (lr_image.shape[1] * self.super_resolution_factor, lr_image.shape[0] * self.super_resolution_factor), 
+      lr_image,
+      (lr_image.shape[1] * self.srf, lr_image.shape[0] * self.srf), 
       interpolation=cv.INTER_CUBIC
     ) for lr_image in lr_images]
-
-    hr_images = self.get_images("HR")
-    hr_images = [hr_image[:-1, :] if hr_image.shape[0] % 2 == 1 else hr_image for hr_image in hr_images]
-    hr_images = [hr_image[:, :-1] if hr_image.shape[1] % 2 == 1 else hr_image for hr_image in hr_images]
-
-    high_frequency_images = [hr_image - bicubic_image for hr_image, bicubic_image in zip(hr_images, bicubic_images)]
 
     # Choose random patches as basis for the dataset
     self.original_dataset = []
     for _ in range(N):
       image_index = np.random.randint(0, len(hr_images))
-      hr_image, high_frequency_image = hr_images[image_index], high_frequency_images[image_index]
+      hr_image, bicubic_image = hr_images[image_index], bicubic_images[image_index]
       x, y = np.random.randint(padding, hr_image.shape[1] - padding), np.random.randint(padding, hr_image.shape[0] - padding)
-      hr_patch = hr_image[y-padding:y+padding+1, x-padding:x+padding+1].reshape(-1)
-      center_pixel = high_frequency_image[y, x]
-      self.original_dataset.append(np.concatenate((hr_patch, [center_pixel])))
+      bicubic_patch = bicubic_image[y-padding:y+padding+1, x-padding:x+padding+1].reshape(-1)
+      center_pixel = hr_image[y, x] - bicubic_image[y, x]
+      data = np.concatenate((bicubic_patch, [center_pixel]))
+      self.original_dataset.append(data)
 
     self.original_dataset = np.unique(np.array(self.original_dataset), axis=0)
   
-    # Choose patches to train on using active sampling
-    distances = [[(np.linalg.norm(datapoint - other_datapoint))**2 for other_datapoint in self.original_dataset if (datapoint != other_datapoint).any()] for datapoint in self.original_dataset]
-    bandwidth = SCALE_COEFFICIENT_BANDWIDTH * np.median(distances)
-    self.available_dataset = np.copy(self.original_dataset)
-    self.dataset = []
-    for _ in range(R):
-      characteristic_scores = [self.get_characteristic_score(datapoint, bandwidth) for datapoint in self.available_dataset]
-      max_characteristic_score_index = np.argmax(characteristic_scores)
-      max_characteristic_score_datapoint = self.available_dataset[max_characteristic_score_index]
-      self.available_dataset = np.delete(self.available_dataset, max_characteristic_score_index, axis=0)
-      self.dataset.append(max_characteristic_score_datapoint)
+    if ACTIVE_SAMPLING_RATIO == 1:
+      self.dataset = np.copy(self.original_dataset)
+    else:
+      distances = np.sum((self.original_dataset[:, None, :] - self.original_dataset[None, :, :])**2, axis=-1)
+      np.fill_diagonal(distances, np.inf)
+      self.bandwidth = SCALE_COEFFICIENT_BANDWIDTH * np.median(np.where(distances != np.inf))
+      neighbor_indices = np.argsort(distances, axis=1)[:,:K]
+      neighbor_distances = np.take_along_axis(distances, neighbor_indices, axis=-1)
+      self.representativeness_scores = np.mean(np.exp(-neighbor_distances / (2*self.bandwidth)), axis=-1)
+
+      self.available_dataset = np.copy(self.original_dataset)
+      self.dataset = []
+      for _ in range(floor(ACTIVE_SAMPLING_RATIO * N)):
+        characteristic_scores = [self.get_characteristic_score(i, datapoint) for (i, datapoint) in enumerate(self.available_dataset)]
+        max_characteristic_score_index = np.argmax(characteristic_scores)
+        max_characteristic_score_datapoint = self.available_dataset[max_characteristic_score_index]
+        self.available_dataset = np.delete(self.available_dataset, max_characteristic_score_index, axis=0)
+        self.dataset.append(max_characteristic_score_datapoint)
 
     # Train the model
     self.train_x = torch.tensor(np.array([datapoint[:-1] for datapoint in self.dataset]))
@@ -118,12 +143,24 @@ class AGPRSuperResolution:
     torch.save(self.train_x, self.get_checkpoint_path("train_x"))
     torch.save(self.train_y, self.get_checkpoint_path("train_y"))
 
-  def upscale(self, image : np.ndarray) -> np.ndarray:
-    image = cv.cvtColor(image, cv.COLOR_BGR2GRAY) / 255
-    
-    upscaled_image = cv.resize(image, (image.shape[1] * self.super_resolution_factor, image.shape[0] * self.super_resolution_factor), interpolation=cv.INTER_CUBIC)
+    if self.verbose: print("Training data set in {:.2f} seconds".format(time() - training_data_time))
 
-    interpolated_image = upscaled_image.copy()
+  def upscale(self, image : np.ndarray) -> np.ndarray:
+    if COLOR_SPACE == ColorSpace.YUV:
+      y, u, v = cv.split(cv.cvtColor(image, cv.COLOR_BGR2YUV))
+      y = self.upscale_channel(y).astype(np.uint8)
+      u = cv.resize(u, (y.shape[1], y.shape[0]), interpolation=cv.INTER_CUBIC)
+      v = cv.resize(v, (y.shape[1], y.shape[0]), interpolation=cv.INTER_CUBIC)
+      return cv.cvtColor(cv.merge((y, u, v)), cv.COLOR_YUV2BGR)
+    elif COLOR_SPACE == ColorSpace.GRAYSCALE:
+      gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+      gray = self.upscale_channel(gray)
+      return gray
+
+  def upscale_channel(self, image : np.ndarray) -> np.ndarray:
+    image = image / 255.
+    
+    upscaled_image = cv.resize(image, (image.shape[1] * self.srf, image.shape[0] * self.srf), interpolation=cv.INTER_CUBIC)
 
     patches = []
     for i in range(padding, upscaled_image.shape[0] - padding):
@@ -134,28 +171,33 @@ class AGPRSuperResolution:
     if torch.cuda.is_available():
       test_x = test_x.cuda()
 
-    predictions = self.model(test_x).mean.detach()
-    if torch.cuda.is_available():
-      predictions = predictions.cpu()
+    predictions = np.zeros((test_x.shape[0],))
+    for i, test_x_batch in enumerate(torch.split(test_x, 1000)):
+      predictions_batch = self.model(test_x_batch).mean.detach()
 
-    predictions = predictions.numpy().reshape((upscaled_image.shape[0] - self.super_resolution_factor * padding, upscaled_image.shape[1] - self.super_resolution_factor * padding))
-    interpolated_image[padding:-padding, padding:-padding] += predictions
-    interpolated_image = np.clip(interpolated_image, 0, 1)
+      if torch.cuda.is_available():
+        predictions_batch = predictions_batch.cpu()
+      
+      predictions[i*1000:(i+1)*1000] = predictions_batch      
 
-    back_projected_image = self.iterative_back_projection(interpolated_image, image)
 
-    return back_projected_image * 255
+    predictions = predictions.reshape((upscaled_image.shape[0] - 2*padding, upscaled_image.shape[1] - 2*padding))
+    upscaled_image[padding:-padding, padding:-padding] += predictions
+
+    upscaled_image = self.iterative_back_projection(upscaled_image, image)
+    upscaled_image = np.clip(upscaled_image, 0, 1)
+
+    return upscaled_image * 255
   
   def iterative_back_projection(self, interpolated_image : np.ndarray, original_image : np.ndarray) -> np.ndarray:
-    max_iterations = 100
+    max_iterations = 50
     back_projection_kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
 
     current_image = interpolated_image.copy()
     current_error = np.inf
 
     for _ in range(max_iterations):
-      blurred = cv.GaussianBlur(current_image, (3, 3), 0)
-      downscaled = cv.resize(blurred, (original_image.shape[1], original_image.shape[0]), interpolation=cv.INTER_CUBIC)
+      downscaled = downscale(current_image)
       difference = original_image - downscaled
       if current_error - 0.01 <= np.linalg.norm(difference)**2: break
       current_error = np.linalg.norm(difference)**2
@@ -166,64 +208,53 @@ class AGPRSuperResolution:
 
     return current_image
 
-  def get_characteristic_score(self, datapoint, bandwidth) -> float:
-    representativeness = self.get_representativeness(datapoint, bandwidth)
-    diversity = self.get_diversity(datapoint, bandwidth)
+  def get_characteristic_score(self, i, datapoint) -> float:
+    representativeness = self.representativeness_scores[i]
+    diversity = self.get_diversity(datapoint)
 
     return CHARACTERISTIC_TRADEOFF * representativeness + (1 - CHARACTERISTIC_TRADEOFF) * diversity
-
-  def get_representativeness(self, datapoint, bandwidth) -> float:
-    distances = np.array([np.linalg.norm(datapoint - other_datapoint)**2 for other_datapoint in self.original_dataset if (datapoint != other_datapoint).any() ])
-    neighbor_distances = np.sort(distances)[:K]
-
-    return np.mean(np.exp(-neighbor_distances / (2*bandwidth)))
   
-  def get_diversity(self, datapoint, bandwidth) -> float:
-    selected_distances = np.array([np.linalg.norm(datapoint - other_datapoint)**2 for other_datapoint in self.dataset ])
+  def get_diversity(self, datapoint) -> float:
+    if len(self.dataset) == 0: return 0
 
-    if len(selected_distances) == 0: return 0
+    selected_distances = np.sum((self.dataset - datapoint)**2, axis=1)
 
-    return np.min(-np.exp(-selected_distances / (2*bandwidth)))
+    return np.min(-np.exp(-selected_distances / (2*self.bandwidth)))
   
-  def get_images(self, resolution):
+  def get_training_images(self, image_type):
     if DATASET == TrainingDataset.Set14:
-      image_paths = [f"Set14/image_SRF_{self.super_resolution_factor}/img_{image_number:03d}_SRF_{self.super_resolution_factor}_{resolution}.png" for image_number in range(1,15)]
+      image_paths = [f"Set14/image_SRF_{self.srf}/img_{image_number:03d}_SRF_{self.srf}_{image_type}.png" for image_number in range(1,15)]
     elif DATASET == TrainingDataset.BSD100:
-      image_paths = load_dataset('eugenesiow/BSD100', split='validation')[resolution.lower()]
+      image_paths = load_dataset('eugenesiow/BSD100', split='validation')[image_type.lower()]
+
     images = [cv.imread(image_path) for image_path in image_paths]
-    images = [cv.cvtColor(image, cv.COLOR_BGR2GRAY) / 255 for image in images]
+
+    if COLOR_SPACE == ColorSpace.YUV:
+      images = [cv.cvtColor(image, cv.COLOR_BGR2YUV)[:,:,0] / 255 for image in images]
+    elif COLOR_SPACE == ColorSpace.GRAYSCALE:
+      images = [cv.cvtColor(image, cv.COLOR_BGR2GRAY) / 255 for image in images]
     return images
   
   def get_checkpoint_path(self, filename):
     return os.path.join(self.get_checkpoint_folder(), filename + ".pt")
   
   def get_checkpoint_folder(self):
-    return f"checkpoints/{DATASET.name}/SRF_{self.super_resolution_factor}/"
+    return f"checkpoints/{DATASET.name}/SRF_{self.srf}/"
+  
+def downscale(image : np.ndarray) -> np.ndarray:
+  image = cv.GaussianBlur(image, (3,3), 1)
+  return cv.resize(image, (image.shape[1] // SRF, image.shape[0] // SRF), interpolation=cv.INTER_CUBIC)
 
 if __name__ == "__main__":
-  sparse_gpr = AGPRSuperResolution(SRF, use_existing_model=False)
+  sparse_gpr = AGPRSuperResolution(SRF, use_existing_model=False, verbose=True)
 
   for i in range(1,15):
-    lr_image = cv.imread(f"Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_LR.png")
+    start_time = time()
+    hr_image = cv.imread(f"Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_HR.png")
+    lr_image = downscale(hr_image)
     interpolated_image = sparse_gpr.upscale(lr_image)
-    cv.imwrite(f"Set14/image_SRF_{SRF}/img_{i:03d}_SRF_2_AGPR.png", interpolated_image)
+    cv.imwrite(f"Set14/image_SRF_{SRF}/img_{i:03d}_SRF_{SRF}_AGPR.png", interpolated_image)
 
-  evaluation = Evaluator(SRF, image_nums=range(1,15))
-  metrics = evaluation.evaluate()
-
-  ## Evaluation code (hacked together)
-  # image_num = 1
-  # agpr_interpolation = sparse_gpr.upscale(cv.imread(f"Set14/image_SRF_2/img_{image_num:03d}_SRF_2_LR.png"))
-  # cv.imwrite(f"Set14/image_SRF_2/img_{image_num:03d}_SRF_2_AGPR.png", agpr_interpolation)
-
-  # # Compare SSIM with bicubic interpolation & GPR
-  # hr_image = cv.imread(f"Set14/image_SRF_2/img_{image_num:03d}_SRF_2_HR.png")
-  # hr_image_gray = cv.cvtColor(hr_image, cv.COLOR_BGR2GRAY)
-  # lr_image = cv.imread(f"Set14/image_SRF_2/img_{image_num:03d}_SRF_2_LR.png")
-  # lr_image_gray = cv.cvtColor(lr_image, cv.COLOR_BGR2GRAY)
-  # gpr_image = cv.imread(f"Set14/image_SRF_2/img_{image_num:03d}_SRF_2_GPR_matern52_gray.png", cv.IMREAD_GRAYSCALE)
-  # agpr_image = cv.imread(f"Set14/image_SRF_2/img_{image_num:03d}_SRF_2_AGPR.png", cv.IMREAD_GRAYSCALE)
-  # bicubic_interpolation = cv.resize(lr_image_gray, (hr_image.shape[1], hr_image.shape[0]), interpolation=cv.INTER_CUBIC)
-  # print("SSIM bicubic interpolation:", metrics.structural_similarity(hr_image_gray, bicubic_interpolation))
-  # print("SSIM SRGPR interpolation:", metrics.structural_similarity(hr_image_gray, gpr_image))
-  # print("SSIM AGPR interpolation:", metrics.structural_similarity(hr_image_gray, agpr_image))
+  evaluation = Evaluator(SRF, image_nums=range(1,15), generate_gpr_images=False, verbose=True)
+  evaluation.evaluate_method("AGPR")
+  evaluation.evaluate_method("bicubic")

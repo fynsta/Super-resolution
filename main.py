@@ -8,7 +8,6 @@ from image_patches import PatchHandler, PatchInterpolationMode
 from kernels import GeneralModel, get_kernel_name, matern32_kernel, matern52_kernel, linear_kernel
 
 torch.manual_seed(0)
-torch.set_default_tensor_type(torch.DoubleTensor)
 
 class ColorSpace(Enum):
   BGR = 0
